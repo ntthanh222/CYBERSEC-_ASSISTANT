@@ -1,0 +1,15 @@
+# Force LF for files that run inside Linux containers or are parsed by a
+# shebang interpreter. Without this, a Windows checkout with the common
+# `core.autocrlf=true` setting silently rewrites LF to CRLF on every clone
+# or `git worktree add`, which corrupts a script's shebang line (`env`
+# resolves the interpreter name literally, so `bash\r` does not exist) and
+# breaks the container at start time with no diff ever showing in `git
+# status`. See docker/backend entrypoint failure investigated in Phase 2.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+
+# PowerShell scripts are edited and run on Windows; CRLF is their native and
+# expected line ending (and Windows PowerShell 5.1 has known issues with
+# non-ASCII characters in LF-only/BOM-less files - see .ai/HANDOFF.md).
+*.ps1 text eol=crlf

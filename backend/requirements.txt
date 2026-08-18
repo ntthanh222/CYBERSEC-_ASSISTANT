@@ -1,0 +1,25 @@
+fastapi==0.140.13
+starlette==1.3.1
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.0
+SQLAlchemy[asyncio]==2.0.36
+psycopg[binary]==3.2.3
+redis==5.2.1
+httpx==0.28.1
+PyJWT[crypto]==2.13.0
+alembic==1.14.0
+python-dotenv==1.2.2
+prometheus-client==0.21.1
+
+# Phase 2.6: Retrieval-Augmented Generation.
+fastembed==0.8.0
+pypdf==6.15.0
+pgvector==0.3.6
+python-multipart==0.0.31
+
+# Phase 3.1: Local RBAC/admin password hashing.
+argon2-cffi==23.1.0
+
+# Security News crawler: safe XML parsing for RSS feeds.
+defusedxml==0.7.1

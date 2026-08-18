@@ -1,0 +1,50 @@
+:root {
+  /* Colors */
+  --bg-primary: #070709;
+  --bg-surface: #08080a;
+  --bg-surface-container: #0f0f14;
+  --bg-surface-low: #0b0b0e;
+  --bg-surface-high: #14141a;
+  --bg-surface-highest: #1c1c24;
+
+  --text-primary: #fbf8fc;
+  --text-secondary: #acaaae;
+  --text-muted: #828184;
+
+  --color-accent: #84fdad; /* Mint green */
+  --color-critical: #ff716c;
+  --color-high: #ff9d6c;
+  --color-medium: #78e3ff;
+  --color-low: #bfa3ff;
+  --color-info: #3b82f6;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+
+  --focus-ring: 0 0 0 2px rgba(132, 253, 173, 0.4);
+
+  /* Radius */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.50rem;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-subtle: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-elevated: 0 4px 6px rgba(0, 0, 0, 0.7);
+
+  /* Spacing */
+  --spacing-xs: 0.25rem;
+  --spacing-sm: 0.5rem;
+  --spacing-md: 1rem;
+  --spacing-lg: 1.5rem;
+  --spacing-xl: 2rem;
+
+  /* Typography */
+  --font-headline: 'Outfit', sans-serif;
+  --font-body: 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Motion */
+  --transition-fast: 150ms ease-out;
+  --transition-normal: 300ms ease-out;
+}

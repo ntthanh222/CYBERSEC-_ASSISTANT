@@ -1,0 +1,8 @@
+node_modules
+dist
+e2e
+e2e-report
+test-results
+playwright-report
+coverage
+*.log

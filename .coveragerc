@@ -1,0 +1,17 @@
+[run]
+source = backend
+concurrency = thread
+core = sysmon
+omit =
+    backend/tests/*
+    backend/database/migrations/*
+    # Ops scripts: DB-touching branches are exercised via real `docker
+    # compose exec` runs against Postgres (see docs/DEMO_DATA.md and
+    # docs/BACKUP_RESTORE.md), not host-side pytest — the host can't reach
+    # the `postgres`/`redis` Docker service names. The production-guard
+    # branch (the part that *can* run host-side) still has unit tests.
+    backend/scripts/*
+
+[report]
+fail_under = 90
+show_missing = true

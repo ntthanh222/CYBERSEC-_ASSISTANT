@@ -1,0 +1,210 @@
+# Phase 1 canonical Compose: frontend, backend, postgres, redis only.
+# Do not add later-phase services (chromadb/rasa/rasa-actions/crawler) before
+# Phase 1 acceptance passes.
+
+# Local-final-hardening: every service previously used Docker's default
+# json-file logging driver, which has no size cap - a long-running local
+# stack (this project's whole point is "leave it running") would grow log
+# files without bound. Capped at 10MB per file, 3 files kept (30MB/service
+# ceiling), applied identically to every service via this anchor.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    # Phase 2.6: pgvector/pgvector bundles the same Postgres 16 as before plus
+    # the `vector` extension pre-installed, so migration 0005's
+    # `CREATE EXTENSION IF NOT EXISTS vector` succeeds locally exactly as it
+    # does on Supabase (which supports pgvector natively). Not a behavioural
+    # change for any earlier table.
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_DB: ${DB_NAME:-cybersec_assistant}
+      POSTGRES_USER: ${DB_USER:-cybersec}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-cybersec} -d ${DB_NAME:-cybersec_assistant}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 512m
+    cpus: 1.0
+    networks: [cybersec-network]
+    logging: *default-logging
+    # SIGTERM triggers Postgres's own "smart" shutdown, which waits for
+    # in-flight transactions and does a clean checkpoint before exiting -
+    # the default 10s grace period can be too short under real write load
+    # (e.g. a document ingest mid-commit), forcing a "fast" shutdown
+    # (rollback of in-flight work) or worse, "immediate". 30s gives real
+    # headroom for a clean checkpoint on this project's data sizes.
+    stop_grace_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 256m
+    cpus: 0.5
+    networks: [cybersec-network]
+    logging: *default-logging
+    # SIGTERM makes redis-server save its final AOF rewrite before exiting;
+    # 15s gives that a real margin over the default 10s.
+    stop_grace_period: 15s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - embedding_cache:/app/.cache
+      # Persistent, runtime-generated Docker-local demo-auth signing secret
+      # (backend/core/local_auth_secret.py) - generated once on first
+      # start, reused across every restart so existing Local Mode sessions
+      # keep working. Never in the image, never committed, never sent to
+      # the frontend - only this container ever reads it.
+      - local_auth_secret:/app/.local-secret
+    # Optional: every Settings field has a safe local default (see
+    # backend/config/settings.py), so `docker compose up -d --build` must
+    # work on a clean checkout with no .env at all. If the operator does
+    # create one (e.g. to point at a real hosted Supabase project), it's
+    # picked up automatically; nothing here requires it to exist.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+    # Bind both loopback addresses, not just IPv4: a client resolving the
+    # hostname "localhost" (as this project's own docs/README tell users
+    # to use) can get the IPv6 loopback (::1) first depending on the OS
+    # resolver order - on Windows in particular, if only 127.0.0.1 is
+    # bound, every request to "localhost" first attempts ::1, fails, and
+    # only then falls back to IPv4, adding real, measured latency (~2s per
+    # request observed directly in this project's own soak test) that
+    # disappears entirely once ::1 is also bound. Neither binding exposes
+    # this to the LAN - both are loopback-only.
+    ports:
+      - "127.0.0.1:8000:8000"
+      - "[::1]:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # 512m was tight enough that a 30-minute release-acceptance soak test
+    # observed the container restart once under sustained load: the local
+    # embedding model alone occupies ~450MB once loaded (first RAG/chat
+    # request), leaving under 65MB of headroom for request handling,
+    # SQLAlchemy pool buffers, and Python's own GC churn. Raised with real
+    # margin above the observed footprint - see
+    # RELEASE_ACCEPTANCE_V0_2_7_REPORT.md's soak section.
+    mem_limit: 1024m
+    # 1.0 was the root cause of intermittent Desktop E2E failures under
+    # local-final-hardening's back-to-back stress runs: `docker stats`
+    # sampled during local-docker-one-command.spec.ts showed the backend
+    # pegged at 95-105% CPU immediately after a restart (embedding model
+    # reload) and again during the "full journey" test's own upload+embed+
+    # local-RAG-answer step, since EMBEDDING_PROVIDER and LLM_PROVIDER both
+    # default to the local/offline providers - no external network call to
+    # absorb wait time, all of it is this container's own CPU. On a single
+    # capped vCPU those two CPU-bound workloads stacking back-to-back
+    # occasionally pushed a 30s Playwright assertion past its timeout - a
+    # real, reproducible resource ceiling, not a nondeterministic flake.
+    # Raised to give headroom matching realistic local desktop hardware.
+    #
+    # Root-validation follow-up (post-merge, feature/phase-2): even at
+    # 2.0, root's mandatory 3x full-suite Playwright run measured real
+    # backend logs showing GET /health (the dependency-free liveness
+    # endpoint, which touches no I/O at all) took 11.2s and POST
+    # /api/auth/local-session took 11.7s, both timestamped exactly at the
+    # restart-recovery test's embedding-rewarmup window - direct evidence
+    # the container was still CPU-starved even at 2.0 during that precise
+    # overlap (login + dashboard render racing the post-restart warmup).
+    # The earlier cpus:2.0 A/B measurement had already shown this
+    # workload peaking at ~205% CPU (i.e. wanting more than 2 full cores)
+    # under stress; this is the same ceiling being hit again under a
+    # different but real trigger. Host has 12 cores available
+    # (`docker info --format '{{.NCPU}}'`), so 4.0 leaves ample headroom
+    # for postgres(1.0)+redis(0.5)+frontend(0.5) plus the host OS.
+    cpus: 6.0
+    networks: [cybersec-network]
+    logging: *default-logging
+    # SIGTERM runs FastAPI's lifespan shutdown (backend/main.py's
+    # lifespan()): cancels the embedding-warmup task, disposes the DB
+    # engine, closes Redis - plus Uvicorn drains in-flight requests before
+    # that. 20s gives real margin over the default 10s so an in-flight
+    # chat/upload request isn't cut off mid-response.
+    stop_grace_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    # See the backend service's identical comment above: bind both loopback
+    # addresses so "localhost" resolves fast on every OS/resolver order.
+    ports:
+      - "127.0.0.1:3000:8080"
+      - "[::1]:3000:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 128m
+    cpus: 0.5
+    networks: [cybersec-network]
+    logging: *default-logging
+    stop_grace_period: 10s
+
+networks:
+  cybersec-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  embedding_cache:
+  local_auth_secret:
+
+# Future services after the correct phase:
+# chromadb, rasa, rasa-actions, crawler

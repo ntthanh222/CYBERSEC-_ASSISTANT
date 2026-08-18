@@ -1,0 +1,12 @@
+.git
+.env
+.venv
+_worktrees
+node_modules
+__pycache__
+.pytest_cache
+playwright-report
+test-results
+testing/reports
+reference/OLD_PROJECT_REPOMIX.md
+*.log

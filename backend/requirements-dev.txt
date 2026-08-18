@@ -1,0 +1,16 @@
+-r requirements.txt
+# httpx moved to requirements.txt in Phase 2: it is now a runtime dependency
+# (CVE provider + URL scanner), not just a TestClient transitive.
+aiosqlite==0.20.0
+pytest==9.0.3
+pytest-asyncio==1.4.0
+pytest-cov==6.0.0
+bandit==1.8.0
+pip-audit==2.7.3
+ruff==0.8.4
+# Test-only: builds real, valid text-layer PDF fixtures for
+# backend/tests/test_knowledge_extraction.py. Never imported by application code.
+reportlab==5.0.0
+# semgrep is intentionally NOT listed here: it has no native Windows wheel
+# (dev host is Windows). CI (Linux) installs it directly; locally it runs
+# via the semgrep/semgrep Docker image instead. See docs/SECURITY.md.

@@ -1,0 +1,75 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+@theme {
+  --color-background: var(--bg-primary);
+  --color-surface: var(--bg-surface);
+  --color-surface-container: var(--bg-surface-container);
+  --color-surface-container-low: var(--bg-surface-low);
+  --color-surface-container-high: var(--bg-surface-high);
+  --color-surface-container-highest: var(--bg-surface-highest);
+  --color-primary: var(--color-accent);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-critical: var(--color-critical);
+  --color-high: var(--color-high);
+  --color-medium: var(--color-medium);
+  --color-low: var(--color-low);
+  --color-info: var(--color-info);
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+
+  --font-headline: var(--font-headline);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+
+  --shadow-subtle: var(--shadow-subtle);
+  --shadow-elevated: var(--shadow-elevated);
+}
+
+@layer base {
+  body {
+    @apply bg-background text-text-primary font-body antialiased;
+    margin: 0;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-headline;
+  }
+}
+
+/* Custom scrollbars matching dark theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg-surface-high);
+  border-radius: var(--radius-md);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Custom animation classes */
+.pulse-mint {
+  box-shadow: 0 0 8px rgba(132, 253, 173, 0.4);
+  animation: pulse-mint-anim 2s infinite alternate;
+}
+
+@keyframes pulse-mint-anim {
+  0% {
+    box-shadow: 0 0 4px rgba(132, 253, 173, 0.3);
+  }
+  100% {
+    box-shadow: 0 0 12px rgba(132, 253, 173, 0.7);
+  }
+}

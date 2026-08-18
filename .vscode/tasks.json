@@ -1,0 +1,82 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Update ChatGPT Project Context",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\scripts\\Update-ChatGPTProjectContext.ps1"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Git Project Status",
+      "type": "shell",
+      "command": "git status --short --branch; git worktree list",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend Targeted Tests",
+      "type": "shell",
+      "command": ".venv\\Scripts\\pytest backend\\tests -v",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend Full Tests",
+      "type": "shell",
+      "command": ".venv\\Scripts\\pytest -v",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend Ruff",
+      "type": "shell",
+      "command": ".venv\\Scripts\\ruff check backend",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend Bandit",
+      "type": "shell",
+      "command": ".venv\\Scripts\\bandit -r backend",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend Lint",
+      "type": "shell",
+      "command": "npm run lint --prefix frontend",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend Type Check",
+      "type": "shell",
+      "command": "npm run type-check --prefix frontend",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend Tests",
+      "type": "shell",
+      "command": "npm run test --prefix frontend",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend Build",
+      "type": "shell",
+      "command": "npm run build --prefix frontend",
+      "problemMatcher": []
+    },
+    {
+      "label": "Docker Backend Build",
+      "type": "shell",
+      "command": "docker compose build backend",
+      "problemMatcher": []
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+target-version = "py312"
+line-length = 100
+exclude = ["backend/database/migrations", "reference"]
+
+[lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# sys.path must be patched before importing the app package.
+"backend/tests/conftest.py" = ["E402"]
+"backend/tests/*.py" = ["E501", "F841"]
+# FastAPI's dependency injection is a call-in-default-argument by design
+# (Depends(...), Query(...)) - not the mutable-default-argument bug B008
+# exists to catch. Phase 1.5 had no Depends() calls at all so this never
+# came up; Phase 2 introduces them across every business route.
+"backend/api/*.py" = ["B008"]
+# Phase 2.5B: get_rls_db is a FastAPI dependency itself (depends on
+# get_current_user/get_db to bind the RLS session to the caller's verified
+# identity), same rationale as backend/api/*.py above.
+"backend/database/session.py" = ["B008"]
+# Phase 3.1: get_app_user/require_admin are FastAPI dependencies themselves
+# (chaining Depends(get_current_user)/Depends(get_db)/Depends(get_app_user)),
+# same rationale as backend/database/session.py above.
+"backend/core/authorization.py" = ["B008"]

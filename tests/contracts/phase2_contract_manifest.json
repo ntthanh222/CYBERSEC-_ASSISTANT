@@ -1,0 +1,60 @@
+{
+  "mode_notes": {
+    "readiness": "Fixture and schema checks may skip API calls when endpoints are not integrated.",
+    "required": "Required mode must fail for missing endpoints once a module is marked required."
+  },
+  "pagination_envelope": ["items", "total", "page", "page_size"],
+  "error_envelope": ["error", "message", "request_id"],
+  "contracts": [
+    {
+      "id": "assistant-response",
+      "module": "AI Assistant",
+      "endpoint": "POST /api/chatbot/chat",
+      "required_response_fields": ["conversation_id", "message_id", "role", "content", "provider", "intent", "created_at", "request_id", "metadata"]
+    },
+    {
+      "id": "url-scanner-response",
+      "module": "URL Scanner",
+      "endpoint": "POST /api/tools/url-scan",
+      "required_response_fields": ["id", "url", "normalized_url", "hostname", "status", "risk_score", "severity", "findings", "recommendations", "duration_ms", "created_at"]
+    },
+    {
+      "id": "password-checker-response",
+      "module": "Password Checker",
+      "endpoint": "LOCAL_FIRST_DEFAULT",
+      "required_response_fields": ["strength", "score", "warnings", "recommendations"],
+      "privacy": "No default network request may include the raw password."
+    },
+    {
+      "id": "cve-response",
+      "module": "CVE Lookup",
+      "endpoint": "GET /api/cves/{cve_id}",
+      "required_response_fields": ["cve_id", "description", "cvss_score", "severity", "references", "source", "cached", "fetched_at"]
+    },
+    {
+      "id": "scan-history-pagination",
+      "module": "Scan History",
+      "endpoint": "GET /api/tools/scan-history",
+      "required_response_fields": ["items", "total", "page", "page_size"]
+    },
+    {
+      "id": "error-response-format",
+      "module": "Errors",
+      "endpoint": "ANY",
+      "required_response_fields": ["error", "message", "request_id"]
+    },
+    {
+      "id": "request-correlation-id",
+      "module": "Observability",
+      "endpoint": "ANY",
+      "required_response_fields": ["request_id"],
+      "required_headers": ["X-Request-ID", "X-Correlation-ID"]
+    },
+    {
+      "id": "health-metrics-regression",
+      "module": "Health",
+      "endpoint": "GET /health, GET /api/system/health, GET /metrics",
+      "required_response_fields": ["status"]
+    }
+  ]
+}
