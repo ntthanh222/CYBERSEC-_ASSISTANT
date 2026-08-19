@@ -228,17 +228,20 @@ class FindingService:
         ``FindingRepository.list_by_assignee``'s docstring and the Task 4
         brief (a caller who was later removed as a project member can still
         see findings already assigned to them here; this is a deliberate
-        choice, not an oversight)."""
-        candidates = await self._findings.list_by_assignee(
-            user_id=actor.id, status=status, severity=severity
+        choice, not an oversight).
+
+        Filtering, the ``overdue`` predicate, and pagination all happen at
+        the SQL level inside ``list_by_assignee`` (Task 4 review fix) -
+        this method is now a thin pass-through, not a Python-side
+        fetch-all-then-filter-then-slice."""
+        return await self._findings.list_by_assignee(
+            user_id=actor.id,
+            status=status,
+            severity=severity,
+            overdue=overdue,
+            page=page,
+            page_size=page_size,
         )
-        if overdue is not None:
-            candidates = [
-                item for item in candidates if sla_service.is_overdue(item[0]) == overdue
-            ]
-        total = len(candidates)
-        start = (page - 1) * page_size
-        return candidates[start : start + page_size], total
 
     async def transition(
         self,

@@ -1,6 +1,6 @@
 """Finding and FindingTransition persistence."""
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
 
 import sqlalchemy as sa
@@ -8,6 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models.finding import Finding, FindingTransition
 from backend.database.models.project import Project
+# TERMINAL_STATUSES is a plain data constant (no repository/session
+# dependency in backend.services.sla), so importing it here to build the
+# SQL overdue predicate for list_by_assignee (Task 4 review fix) does not
+# create a circular import - it is the single source of truth for "which
+# statuses can never be overdue", shared with sla.is_overdue's own
+# definition, and must be kept in sync with it.
+from backend.services.sla import TERMINAL_STATUSES
 
 
 class FindingRepository:
@@ -158,33 +165,54 @@ class FindingRepository:
         user_id: uuid.UUID,
         status: Optional[str],
         severity: Optional[str],
-    ) -> Sequence[tuple[Finding, str]]:
-        """Every Finding assigned to ``user_id``, across every project,
-        joined with its parent ``Project.name`` for the cross-project "My
-        Tasks" view (Task 4) - authorization-safe by construction: the
+        overdue: Optional[bool],
+        page: int,
+        page_size: int,
+    ) -> tuple[Sequence[tuple[Finding, str]], int]:
+        """Findings assigned to ``user_id``, across every project, joined
+        with their parent ``Project.name`` for the cross-project "My Tasks"
+        view (Task 4) - authorization-safe by construction: the
         ``assignee_user_id == user_id`` filter means a caller can only ever
         see their own assignments regardless of their current project
         membership state, see the Task 4 brief.
 
-        No pagination here, same reasoning as
-        ``list_all_for_project_unpaginated``: an ``overdue`` filter has no
-        SQL representation (``sla.is_overdue`` is pure Python), so the
-        service layer fetches every status/severity-matching row, filters by
-        ``is_overdue`` in Python, then paginates the filtered set.
+        SQL-level filtered and paginated (Task 4 review fix - the original
+        version fetched every assigned row across every project, unbounded,
+        then filtered/paginated in Python; unlike
+        ``list_all_for_project_unpaginated``, which is at least scoped to a
+        single project, this query is scoped only to one user across the
+        *entire app*, which does not scale for a long-tenured developer).
+        ``deadline`` is a real stored column, so unlike
+        ``list_all_for_project_unpaginated``'s ``overdue`` handling, this one
+        expresses "overdue" as a genuine SQL predicate mirroring
+        ``sla.is_overdue``'s exact definition: a non-null ``deadline`` in the
+        past, on a Finding whose status isn't one of ``TERMINAL_STATUSES``.
         """
         filters: list[Any] = [Finding.assignee_user_id == user_id]
         if status is not None:
             filters.append(Finding.status == status)
         if severity is not None:
             filters.append(Finding.severity == severity)
+        if overdue is not None:
+            is_overdue_predicate = sa.and_(
+                Finding.deadline.is_not(None),
+                Finding.status.notin_(TERMINAL_STATUSES),
+                Finding.deadline < datetime.now(timezone.utc),
+            )
+            filters.append(is_overdue_predicate if overdue else sa.not_(is_overdue_predicate))
 
+        total = await self._session.scalar(
+            sa.select(sa.func.count()).select_from(Finding).where(*filters)
+        )
         rows = await self._session.execute(
             sa.select(Finding, Project.name)
             .join(Project, Project.id == Finding.project_id)
             .where(*filters)
             .order_by(Finding.created_at.desc(), Finding.id)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
         )
-        return [(row[0], row[1]) for row in rows.all()]
+        return [(row[0], row[1]) for row in rows.all()], int(total or 0)
 
     async def touch_last_seen(self, finding: Finding, *, scan_run_id: uuid.UUID) -> Finding:
         finding.last_seen_scan_run_id = scan_run_id
