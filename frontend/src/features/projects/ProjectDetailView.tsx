@@ -13,7 +13,8 @@ import {
   type Technology,
 } from '../../lib/api/projects';
 import { ApiError } from '../../lib/api/client';
-import { AlertTriangle, RefreshCw, UserPlus, Trash2, ShieldCheck, Plus } from 'lucide-react';
+import { AlertTriangle, RefreshCw, UserPlus, Trash2, Plus } from 'lucide-react';
+import { FindingListView } from '../findings/FindingListView';
 
 const ROLE_OPTIONS: ProjectRole[] = ['owner', 'security', 'developer', 'viewer'];
 type Tab = 'overview' | 'members' | 'technologies' | 'security';
@@ -308,9 +309,8 @@ export const ProjectDetailView: React.FC = () => {
       )}
 
       {tab === 'security' && (
-        <div className="flex flex-col items-center justify-center py-16 gap-3 text-text-muted bg-surface-container border border-surface-container-highest rounded-xl" data-testid="project-security-placeholder">
-          <ShieldCheck className="h-10 w-10 opacity-30" />
-          <p className="text-xs italic">Quét bảo mật và phát hiện lỗ hổng sẽ có trong giai đoạn tiếp theo.</p>
+        <div data-testid="project-security">
+          <FindingListView projectId={project.id} />
         </div>
       )}
     </div>

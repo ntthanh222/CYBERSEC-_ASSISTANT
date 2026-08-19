@@ -59,6 +59,8 @@ import { WorkspaceFormView } from '../features/workspaces/WorkspaceFormView';
 import { ProjectListView } from '../features/projects/ProjectListView';
 import { ProjectDetailView } from '../features/projects/ProjectDetailView';
 import { ProjectFormView } from '../features/projects/ProjectFormView';
+import { FindingListView } from '../features/findings/FindingListView';
+import { FindingDetailView } from '../features/findings/FindingDetailView';
 
 // Router protection wrapper
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -155,6 +157,10 @@ export const AppRoutes: React.FC = () => {
       <Route path="/projects/:id/edit" element={<ProtectedRoute><ProjectFormView /></ProtectedRoute>} />
       <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetailView /></ProtectedRoute>} />
       <Route path="/projects" element={<ProtectedRoute><ProjectListView /></ProtectedRoute>} />
+
+      {/* Findings — vuln-lifecycle Scan -> Finding pipeline (Task 2) */}
+      <Route path="/projects/:id/findings/:findingId" element={<ProtectedRoute><FindingDetailView /></ProtectedRoute>} />
+      <Route path="/projects/:id/findings" element={<ProtectedRoute><FindingListView /></ProtectedRoute>} />
 
       {/* Assets — Phase 3 */}
       <Route path="/assets" element={<ProtectedRoute><AssetInventoryView /></ProtectedRoute>} />

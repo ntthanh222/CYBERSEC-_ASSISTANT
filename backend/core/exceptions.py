@@ -172,6 +172,36 @@ class UnsupportedMediaTypeError(AppError):
     status_code = 415
 
 
+class InvalidTransitionError(AppError):
+    """A Finding status transition is not reachable from its current status
+    at all (not in ``finding_state_machine.ALLOWED_TRANSITIONS``), regardless
+    of who is asking. Distinct from :class:`ForbiddenTransitionError` (a
+    reachable transition the *actor* specifically may not perform)."""
+
+    error = "invalid_transition"
+    message = "That status transition is not allowed."
+    status_code = 422
+
+
+class ForbiddenTransitionError(AppError):
+    """The transition is a valid state-machine edge, but this actor's role
+    does not permit performing it (e.g. a developer trying to verify/close a
+    finding)."""
+
+    error = "forbidden_transition"
+    message = "You do not have permission to perform this status transition."
+    status_code = 403
+
+
+class ReasonRequiredError(AppError):
+    """A ``false_positive``/``accepted_risk`` transition was attempted
+    without a non-empty ``reason``."""
+
+    error = "reason_required"
+    message = "A reason is required for this transition."
+    status_code = 422
+
+
 class BlockedTargetError(AppError):
     """A scan target was rejected by the SSRF guard.
 

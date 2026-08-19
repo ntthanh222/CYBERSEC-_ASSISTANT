@@ -156,10 +156,11 @@ describe('Project Detail View — real backend', () => {
     expect(screen.getByText(/Django @ 4.2/)).toBeInTheDocument();
   });
 
-  it('shows the Security tab as a coming-soon placeholder, never fabricated findings', async () => {
+  it('shows the Security tab with a real (empty) finding list, never fabricated findings', async () => {
     authFetchMock.mockImplementation((url: string) => {
       const u = String(url);
       if (u.includes(`/api/projects/${PROJECT_1.id}/members`)) return listResponse([]);
+      if (u.includes(`/api/projects/${PROJECT_1.id}/findings`)) return listResponse([]);
       if (u.includes(`/api/projects/${PROJECT_1.id}`)) return jsonResponse(PROJECT_1);
       return jsonResponse({ error: 'not_found', message: 'not found' }, 404);
     });
@@ -167,8 +168,6 @@ describe('Project Detail View — real backend', () => {
     renderProjectDetail(PROJECT_1.id);
     await waitFor(() => expect(screen.getByTestId('project-tab-security')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('project-tab-security'));
-    await waitFor(() =>
-      expect(screen.getByTestId('project-security-placeholder')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId('finding-list-empty')).toBeInTheDocument());
   });
 });

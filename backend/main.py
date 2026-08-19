@@ -16,6 +16,7 @@ from backend.api.assets import router as assets_router
 from backend.api.chatbot import router as chatbot_router
 from backend.api.cves import router as cves_router
 from backend.api.demo import router as demo_router
+from backend.api.findings import router as findings_router
 from backend.api.health import router as health_router
 from backend.api.incidents import router as incidents_router
 from backend.api.knowledge import router as knowledge_router
@@ -28,6 +29,7 @@ from backend.api.notifications import router as notifications_router
 from backend.api.projects import router as projects_router
 from backend.api.reports import router as reports_router
 from backend.api.scan_history import router as scan_history_router
+from backend.api.scans import router as scans_router
 from backend.api.security_news import router as security_news_router
 from backend.api.system import router as system_router
 from backend.api.threat_intel import router as threat_intel_router
@@ -215,6 +217,8 @@ app.include_router(reports_router)
 app.include_router(notifications_router)
 app.include_router(workspaces_router)
 app.include_router(projects_router)
+app.include_router(scans_router)
+app.include_router(findings_router)
 
 
 def _request_id_from(request: Request) -> str:
