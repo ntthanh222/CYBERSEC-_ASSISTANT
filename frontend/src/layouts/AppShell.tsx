@@ -8,6 +8,7 @@ import {
   Menu, X, Bell, Search, User as UserIcon, LogOut, Shield,
   LayoutDashboard, BrainCircuit, Settings, ChevronDown,
   Globe, KeyRound, FileSearch, Newspaper, History as HistoryIcon,
+  FolderKanban,
 } from 'lucide-react';
 
 interface AppShellProps {
@@ -118,6 +119,7 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
       items: [
         { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
         { name: 'AI Assistant', path: '/ai', icon: BrainCircuit },
+        { name: 'Dự án', path: '/projects', icon: FolderKanban },
       ]
     },
     {

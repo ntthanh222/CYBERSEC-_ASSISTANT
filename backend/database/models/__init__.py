@@ -11,12 +11,14 @@ from backend.database.models.incident import IncidentRecord, IncidentTask, Incid
 from backend.database.models.knowledge import KnowledgeChunk, KnowledgeDocument
 from backend.database.models.mitre import MitreTechniqueCoverage
 from backend.database.models.notification import NotificationRecord
+from backend.database.models.project import Project, ProjectMember
 from backend.database.models.rbac import AdminAuditLog, LocalAdminCredential, UserRole
 from backend.database.models.report import ReportRecord
 from backend.database.models.scan_history import SecurityScanRecord
 from backend.database.models.security_news import SecurityNewsArticle
 from backend.database.models.threat_intel import ThreatIOC
 from backend.database.models.vulnerability import VulnerabilityPatchTask, VulnerabilityRecord
+from backend.database.models.workspace import Workspace, WorkspaceMember
 
 __all__ = [
     "Conversation",
@@ -41,4 +43,8 @@ __all__ = [
     "ThreatIOC",
     "VulnerabilityRecord",
     "VulnerabilityPatchTask",
+    "Workspace",
+    "WorkspaceMember",
+    "Project",
+    "ProjectMember",
 ]

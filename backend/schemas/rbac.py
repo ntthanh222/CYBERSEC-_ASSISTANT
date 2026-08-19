@@ -4,7 +4,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-Role = Literal["user", "security_analyst", "admin", "super_admin"]
+Role = Literal["user", "developer", "security_analyst", "admin", "super_admin"]
 
 
 class AdminSetupStatusResponse(BaseModel):

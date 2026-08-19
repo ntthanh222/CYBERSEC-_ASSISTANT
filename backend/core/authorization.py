@@ -74,6 +74,9 @@ def _require_min_role(minimum: str, *, message: str):
     return _dependency
 
 
+require_developer = _require_min_role(
+    "developer", message="Developer privileges are required for this action."
+)
 require_analyst = _require_min_role(
     "security_analyst", message="Security analyst privileges are required for this action."
 )

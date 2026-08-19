@@ -23,3 +23,8 @@ ignore = ["E501"]
 # (chaining Depends(get_current_user)/Depends(get_db)/Depends(get_app_user)),
 # same rationale as backend/database/session.py above.
 "backend/core/authorization.py" = ["B008"]
+# Task 1 (vuln-lifecycle foundation): get_workspace_member/get_project_member
+# and their require_*_role() factories are FastAPI dependencies themselves,
+# same rationale as backend/core/authorization.py above.
+"backend/core/workspace_authorization.py" = ["B008"]
+"backend/core/project_authorization.py" = ["B008"]

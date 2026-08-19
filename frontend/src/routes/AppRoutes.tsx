@@ -52,6 +52,14 @@ import { ProfileView } from '../features/profile/ProfileView';
 import { NotificationsView } from '../features/notifications/views/NotificationsView';
 import { OnboardingView } from '../features/onboarding/views/OnboardingView';
 
+// Vuln-lifecycle foundation — Task 1
+import { WorkspaceListView } from '../features/workspaces/WorkspaceListView';
+import { WorkspaceDetailView } from '../features/workspaces/WorkspaceDetailView';
+import { WorkspaceFormView } from '../features/workspaces/WorkspaceFormView';
+import { ProjectListView } from '../features/projects/ProjectListView';
+import { ProjectDetailView } from '../features/projects/ProjectDetailView';
+import { ProjectFormView } from '../features/projects/ProjectFormView';
+
 // Router protection wrapper
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isLoading } = useAuth();
@@ -136,6 +144,17 @@ export const AppRoutes: React.FC = () => {
       <Route path="/threat-intelligence/iocs/:id" element={<ProtectedRoute><IOCDetailView /></ProtectedRoute>} />
       <Route path="/threat-intelligence/graph" element={<ProtectedRoute><IOCGraphView /></ProtectedRoute>} />
       <Route path="/threat-intelligence/watchlist" element={<ProtectedRoute><IOCWatchlistView /></ProtectedRoute>} />
+
+      {/* Workspaces / Projects — vuln-lifecycle foundation (Task 1) */}
+      <Route path="/workspaces/new" element={<ProtectedRoute><WorkspaceFormView /></ProtectedRoute>} />
+      <Route path="/workspaces/:id/edit" element={<ProtectedRoute><WorkspaceFormView /></ProtectedRoute>} />
+      <Route path="/workspaces/:id" element={<ProtectedRoute><WorkspaceDetailView /></ProtectedRoute>} />
+      <Route path="/workspaces" element={<ProtectedRoute><WorkspaceListView /></ProtectedRoute>} />
+
+      <Route path="/projects/new" element={<ProtectedRoute><ProjectFormView /></ProtectedRoute>} />
+      <Route path="/projects/:id/edit" element={<ProtectedRoute><ProjectFormView /></ProtectedRoute>} />
+      <Route path="/projects/:id" element={<ProtectedRoute><ProjectDetailView /></ProtectedRoute>} />
+      <Route path="/projects" element={<ProtectedRoute><ProjectListView /></ProtectedRoute>} />
 
       {/* Assets — Phase 3 */}
       <Route path="/assets" element={<ProtectedRoute><AssetInventoryView /></ProtectedRoute>} />

@@ -21,7 +21,11 @@ from backend.database.base import (
 )
 
 # Ordered lowest to highest privilege - ROLE_RANK below relies on this order.
-ROLES = ("user", "security_analyst", "admin", "super_admin")
+# "developer" sits between "user" and "security_analyst" (Task 1 of the
+# vuln-lifecycle build: a linear additive extension, not a new branch of the
+# hierarchy). "viewer" is deliberately never added here - it only exists as a
+# PROJECT_MEMBER_ROLES value (project-scoped), never as a global role.
+ROLES = ("user", "developer", "security_analyst", "admin", "super_admin")
 
 # Numeric rank per role, for "does this role satisfy at least X" checks
 # (backend/core/authorization.py) and for the admin-tier/super-admin lockout
@@ -45,7 +49,7 @@ class UserRole(TimestampMixin, Base):
 
     __table_args__ = (
         sa.CheckConstraint(
-            "role IN ('user', 'security_analyst', 'admin', 'super_admin')",
+            "role IN ('user', 'developer', 'security_analyst', 'admin', 'super_admin')",
             name="ck_user_roles_role",
         ),
     )

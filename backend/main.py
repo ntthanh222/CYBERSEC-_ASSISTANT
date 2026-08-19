@@ -25,6 +25,7 @@ from backend.api.local_auth import router as local_auth_router
 from backend.api.metrics import router as metrics_router
 from backend.api.mitre import router as mitre_router
 from backend.api.notifications import router as notifications_router
+from backend.api.projects import router as projects_router
 from backend.api.reports import router as reports_router
 from backend.api.scan_history import router as scan_history_router
 from backend.api.security_news import router as security_news_router
@@ -32,6 +33,7 @@ from backend.api.system import router as system_router
 from backend.api.threat_intel import router as threat_intel_router
 from backend.api.tools import router as tools_router
 from backend.api.vulnerabilities import router as vulnerabilities_router
+from backend.api.workspaces import router as workspaces_router
 from backend.config.settings import get_settings
 from backend.core.context import get_request_id
 from backend.core.embedding_readiness import mark_failed, mark_ready, mark_warming
@@ -211,6 +213,8 @@ app.include_router(attack_graph_router)
 app.include_router(security_news_router)
 app.include_router(reports_router)
 app.include_router(notifications_router)
+app.include_router(workspaces_router)
+app.include_router(projects_router)
 
 
 def _request_id_from(request: Request) -> str:

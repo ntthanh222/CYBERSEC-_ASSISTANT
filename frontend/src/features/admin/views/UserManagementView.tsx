@@ -12,7 +12,7 @@ type LoadState =
   | { status: 'error'; message: string }
   | { status: 'ready'; page: AdminUserPage };
 
-const roles: Array<AppRole | 'all'> = ['all', 'user', 'security_analyst', 'admin', 'super_admin'];
+const roles: Array<AppRole | 'all'> = ['all', 'user', 'developer', 'security_analyst', 'admin', 'super_admin'];
 const statuses = ['all', 'active', 'disabled'] as const;
 const sources = ['all', 'demo', 'test', 'local', 'hosted'] as const;
 

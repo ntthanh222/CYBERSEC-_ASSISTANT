@@ -1,6 +1,6 @@
 import { apiGet } from './client';
 
-export type AppRole = 'user' | 'security_analyst' | 'admin' | 'super_admin';
+export type AppRole = 'user' | 'developer' | 'security_analyst' | 'admin' | 'super_admin';
 
 export interface MeResponse {
   id: string;
