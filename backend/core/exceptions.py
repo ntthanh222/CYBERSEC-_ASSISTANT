@@ -202,6 +202,17 @@ class ReasonRequiredError(AppError):
     status_code = 422
 
 
+class InvalidAssigneeError(AppError):
+    """A Finding assignment was attempted against a ``assignee_user_id`` that
+    is not an eligible project member (no ``ProjectMember`` row for this
+    project, or a ``viewer`` role - see
+    ``backend.services.finding.FindingService.set_assignee``)."""
+
+    error = "invalid_assignee"
+    message = "The target user is not an eligible assignee for this project."
+    status_code = 422
+
+
 class BlockedTargetError(AppError):
     """A scan target was rejected by the SSRF guard.
 

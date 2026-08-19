@@ -25,6 +25,7 @@ from backend.api.local_admin import unified_login_router
 from backend.api.local_auth import router as local_auth_router
 from backend.api.metrics import router as metrics_router
 from backend.api.mitre import router as mitre_router
+from backend.api.my_tasks import router as my_tasks_router
 from backend.api.notifications import router as notifications_router
 from backend.api.projects import router as projects_router
 from backend.api.reports import router as reports_router
@@ -221,6 +222,7 @@ app.include_router(workspaces_router)
 app.include_router(projects_router)
 app.include_router(scans_router)
 app.include_router(findings_router)
+app.include_router(my_tasks_router)
 app.include_router(sla_policies_admin_router)
 app.include_router(sla_policies_project_router)
 

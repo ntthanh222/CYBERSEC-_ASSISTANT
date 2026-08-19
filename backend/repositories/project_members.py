@@ -57,6 +57,23 @@ class ProjectMemberRepository:
         )
         return list(rows)
 
+    async def list_by_roles(
+        self, *, project_id: uuid.UUID, project_roles: Sequence[str]
+    ) -> Sequence[ProjectMember]:
+        """Members of ``project_id`` whose ``project_role`` is any of
+        ``project_roles`` - the eligible-assignee picker (Task 4) needs
+        "developer OR security OR owner" in one query rather than three
+        calls to ``list_by_role``."""
+        rows = await self._session.scalars(
+            sa.select(ProjectMember)
+            .where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.project_role.in_(project_roles),
+            )
+            .order_by(ProjectMember.created_at.asc())
+        )
+        return list(rows)
+
     async def count_by_role(self, *, project_id: uuid.UUID, role: str) -> int:
         result = await self._session.scalar(
             sa.select(sa.func.count())

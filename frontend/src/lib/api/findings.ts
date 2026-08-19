@@ -74,6 +74,28 @@ export interface FindingFilters {
   overdue?: boolean;
 }
 
+/** A project member eligible to be a Finding's assignee (Task 4) - project
+ * role developer/security/owner, never viewer. No local User table exists
+ * in this app, so (same as ProjectMember) there is no display name/email -
+ * just the raw user_id. */
+export interface EligibleAssignee {
+  user_id: string;
+  project_role: 'developer' | 'security' | 'owner';
+}
+
+/** A cross-project "My Tasks" row: a Finding plus its parent project's name. */
+export interface MyTask extends Finding {
+  project_name: string;
+}
+
+export interface MyTaskFilters {
+  page?: number;
+  pageSize?: number;
+  status?: FindingStatus;
+  severity?: FindingSeverity;
+  overdue?: boolean;
+}
+
 export function listFindings(projectId: string, filters: FindingFilters = {}): Promise<Page<Finding>> {
   const params = new URLSearchParams();
   params.set('page', String(filters.page ?? 1));
@@ -113,4 +135,18 @@ export function setAssignee(
   return apiPatch<Finding>(`/api/projects/${projectId}/findings/${findingId}/assignee`, {
     assignee_user_id: assigneeUserId,
   });
+}
+
+export function listEligibleAssignees(projectId: string): Promise<{ items: EligibleAssignee[] }> {
+  return apiGet<{ items: EligibleAssignee[] }>(`/api/projects/${projectId}/findings/eligible-assignees`);
+}
+
+export function listMyTasks(filters: MyTaskFilters = {}): Promise<Page<MyTask>> {
+  const params = new URLSearchParams();
+  params.set('page', String(filters.page ?? 1));
+  params.set('page_size', String(filters.pageSize ?? 20));
+  if (filters.status) params.set('status', filters.status);
+  if (filters.severity) params.set('severity', filters.severity);
+  if (filters.overdue !== undefined) params.set('overdue', String(filters.overdue));
+  return apiGet<Page<MyTask>>(`/api/findings/my-tasks?${params.toString()}`);
 }

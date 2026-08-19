@@ -3,6 +3,9 @@ import { useParams, Link } from 'react-router-dom';
 import {
   getFinding,
   transitionFinding,
+  setAssignee,
+  listEligibleAssignees,
+  type EligibleAssignee,
   type Finding,
   type FindingStatus,
 } from '../../lib/api/findings';
@@ -70,15 +73,21 @@ export const FindingDetailView: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [reasonDraft, setReasonDraft] = useState('');
   const [pendingTransition, setPendingTransition] = useState<FindingStatus | null>(null);
+  const [eligibleAssignees, setEligibleAssignees] = useState<EligibleAssignee[]>([]);
+  const [assigneeDraft, setAssigneeDraft] = useState('');
+  const [assigneeError, setAssigneeError] = useState<string | null>(null);
+  const [isSavingAssignee, setIsSavingAssignee] = useState(false);
 
   const load = useCallback(() => {
     if (!id || !findingId) return;
     setIsLoading(true);
-    Promise.all([getFinding(id, findingId), listProjectMembers(id)])
-      .then(([findingRecord, memberPage]) => {
+    Promise.all([getFinding(id, findingId), listProjectMembers(id), listEligibleAssignees(id)])
+      .then(([findingRecord, memberPage, assigneePage]) => {
         setFinding(findingRecord);
         const mine = memberPage.items.find((member) => member.user_id === user?.id);
         setMyRole(mine?.project_role ?? null);
+        setEligibleAssignees(assigneePage.items);
+        setAssigneeDraft(findingRecord.assignee_user_id ?? '');
         setErrorMsg(null);
       })
       .catch((err) => setErrorMsg(err instanceof ApiError ? err.message : 'Không thể tải phát hiện.'))
@@ -90,6 +99,22 @@ export const FindingDetailView: React.FC = () => {
   }, [load]);
 
   const isAssignee = !!finding && !!user && finding.assignee_user_id === user.id;
+  const canManageAssignee =
+    user?.role === 'admin' || user?.role === 'super_admin' || myRole === 'owner' || myRole === 'security';
+
+  const handleAssigneeSave = async () => {
+    if (!id || !findingId) return;
+    setAssigneeError(null);
+    setIsSavingAssignee(true);
+    try {
+      const updated = await setAssignee(id, findingId, assigneeDraft || null);
+      setFinding(updated);
+    } catch (err) {
+      setAssigneeError(err instanceof ApiError ? err.message : 'Không thể gán người phụ trách.');
+    } finally {
+      setIsSavingAssignee(false);
+    }
+  };
 
   const availableTransitions = useMemo(() => {
     if (!finding) return [];
@@ -156,6 +181,40 @@ export const FindingDetailView: React.FC = () => {
       {finding.resolution_reason && (
         <Field label="Lý do giải quyết" value={finding.resolution_reason} />
       )}
+
+      <div className="bg-surface-container border border-surface-container-highest rounded-xl p-3 space-y-2" data-testid="finding-assignee">
+        <span className="text-[9px] font-mono uppercase tracking-widest text-text-muted font-bold">
+          Người phụ trách
+        </span>
+        {canManageAssignee ? (
+          <div className="flex flex-wrap gap-2 items-center">
+            <select
+              value={assigneeDraft}
+              onChange={(event) => setAssigneeDraft(event.target.value)}
+              data-testid="assignee-select"
+              className="bg-background border border-surface-container-highest rounded-lg px-3 py-2 text-xs text-text-primary focus:outline-none"
+            >
+              <option value="">Chưa gán</option>
+              {eligibleAssignees.map((assignee) => (
+                <option key={assignee.user_id} value={assignee.user_id}>
+                  {assignee.user_id} ({assignee.project_role})
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleAssigneeSave}
+              disabled={isSavingAssignee}
+              data-testid="assignee-save-button"
+              className="px-3 py-2 bg-primary text-background rounded-lg text-xs font-mono font-bold disabled:opacity-40"
+            >
+              {isSavingAssignee ? 'ĐANG LƯU...' : 'GÁN'}
+            </button>
+            {assigneeError && <p className="text-xs text-critical w-full">{assigneeError}</p>}
+          </div>
+        ) : (
+          <p className="text-xs text-text-primary">{finding.assignee_user_id ?? '—'}</p>
+        )}
+      </div>
 
       <div className="space-y-3" data-testid="finding-transitions">
         {actionError && <p className="text-xs text-critical">{actionError}</p>}

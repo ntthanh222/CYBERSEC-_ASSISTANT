@@ -18,6 +18,7 @@ from backend.core.audit import log_audit_event
 from backend.core.authorization import AppUser
 from backend.core.exceptions import (
     ForbiddenTransitionError as ApiForbiddenTransitionError,
+    InvalidAssigneeError,
     InvalidRequestError,
     InvalidTransitionError as ApiInvalidTransitionError,
     NotFoundError,
@@ -31,8 +32,17 @@ from backend.repositories.rbac import RbacRepository
 from backend.services import finding_state_machine as fsm
 from backend.services import sla as sla_service
 from backend.services.finding_fingerprint import compute_fingerprint
+from backend.services.notifications import NotificationService
 
-__all__ = ["compute_fingerprint", "FindingService"]
+__all__ = ["compute_fingerprint", "FindingService", "ELIGIBLE_ASSIGNEE_ROLES"]
+
+#: Project roles eligible to be a Finding's ``assignee_user_id`` (Task 4).
+#: Deliberately NOT "viewer" - viewers are read-only by definition. The plan's
+#: requirement #3 ("Security/Admin assign Finding cho Developer") names
+#: developer as the target role but does not forbid a security/owner-role
+#: member self-assigning to work a finding directly, so all three
+#: non-viewer project roles are eligible - see the Task 4 brief.
+ELIGIBLE_ASSIGNEE_ROLES = ("developer", "security", "owner")
 
 
 class FindingService:
@@ -143,12 +153,31 @@ class FindingService:
         actor: AppUser,
         actor_label: Optional[str],
     ) -> Finding:
-        """Bare setter - Task 2 scope only. No validation that
-        ``assignee_user_id`` is actually a project developer member; Task 4
-        adds the real assign endpoint with that validation. Callable only by
+        """Validated setter (Task 4, replacing Task 2's bare setter).
+
+        ``assignee_user_id`` must correspond to an active ``ProjectMember``
+        row for this finding's project whose ``project_role`` is one of
+        ``ELIGIBLE_ASSIGNEE_ROLES`` (developer/security/owner - never
+        viewer). Raises :class:`InvalidAssigneeError` (422) otherwise.
+        Clearing the assignee (``None``) is always allowed without
+        validation - unassigning is always safe. Callable only by
         route-level owner/security-or-admin (enforced by
-        ``require_project_role`` on the route, not re-checked here)."""
+        ``require_project_role`` on the route, not re-checked here).
+
+        A plain ``log_audit_event`` call is the only audit trail this writes
+        - a full ``FindingTransition`` row would be overkill, since
+        assignment is not a status-machine transition (see the Task 4
+        brief)."""
         finding = await self.get(finding_id, project_id=project_id)
+
+        if assignee_user_id is not None:
+            member = await self._members.get(project_id=project_id, user_id=assignee_user_id)
+            if member is None or member.project_role not in ELIGIBLE_ASSIGNEE_ROLES:
+                raise InvalidAssigneeError(
+                    "assignee_user_id must be an active project member with role "
+                    f"in {ELIGIBLE_ASSIGNEE_ROLES} (not viewer, and not a non-member)."
+                )
+
         finding = await self._findings.set_assignee(finding, assignee_user_id=assignee_user_id)
         await self._session.commit()
         log_audit_event(
@@ -159,7 +188,57 @@ class FindingService:
             actor=actor_label,
             metadata={"assignee_user_id": str(assignee_user_id) if assignee_user_id else None},
         )
+        if assignee_user_id is not None:
+            # Trivial one-call wiring into the existing notifications module
+            # (backend.services.notifications) - no new schema, no queue.
+            # Best-effort: NotificationService.notify_users already swallows
+            # a per-recipient failure rather than raising, so this can never
+            # roll back the assignment that already committed above.
+            await NotificationService(self._session).notify_users(
+                [assignee_user_id],
+                title="Bạn được gán một finding mới",
+                body=f"Bạn đã được gán phụ trách finding '{finding.title}' (mức độ {finding.severity}).",
+                category="vulnerability",
+                severity="warning" if finding.severity in ("high", "critical") else "info",
+                source_ref=f"finding:{finding.id}",
+                actor=actor_label,
+            )
         return finding
+
+    async def list_eligible_assignees(self, project_id: uuid.UUID):
+        """Project members eligible to be assigned a Finding - powers the
+        frontend assignee picker. Same eligibility set as ``set_assignee``'s
+        validation (``ELIGIBLE_ASSIGNEE_ROLES``)."""
+        return await self._members.list_by_roles(
+            project_id=project_id, project_roles=ELIGIBLE_ASSIGNEE_ROLES
+        )
+
+    async def list_my_tasks(
+        self,
+        *,
+        actor: AppUser,
+        status: Optional[str],
+        severity: Optional[str],
+        overdue: Optional[bool],
+        page: int,
+        page_size: int,
+    ):
+        """Cross-project "My Tasks": every Finding assigned to the caller,
+        across every project - authorization-safe by construction, see
+        ``FindingRepository.list_by_assignee``'s docstring and the Task 4
+        brief (a caller who was later removed as a project member can still
+        see findings already assigned to them here; this is a deliberate
+        choice, not an oversight)."""
+        candidates = await self._findings.list_by_assignee(
+            user_id=actor.id, status=status, severity=severity
+        )
+        if overdue is not None:
+            candidates = [
+                item for item in candidates if sla_service.is_overdue(item[0]) == overdue
+            ]
+        total = len(candidates)
+        start = (page - 1) * page_size
+        return candidates[start : start + page_size], total
 
     async def transition(
         self,

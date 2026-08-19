@@ -61,6 +61,7 @@ import { ProjectDetailView } from '../features/projects/ProjectDetailView';
 import { ProjectFormView } from '../features/projects/ProjectFormView';
 import { FindingListView } from '../features/findings/FindingListView';
 import { FindingDetailView } from '../features/findings/FindingDetailView';
+import { MyTasksView } from '../features/findings/MyTasksView';
 
 // Vuln-lifecycle foundation — Task 3 (SLA policies)
 import { SlaPolicyView } from '../features/sla/SlaPolicyView';
@@ -164,6 +165,11 @@ export const AppRoutes: React.FC = () => {
       {/* Findings — vuln-lifecycle Scan -> Finding pipeline (Task 2) */}
       <Route path="/projects/:id/findings/:findingId" element={<ProtectedRoute><FindingDetailView /></ProtectedRoute>} />
       <Route path="/projects/:id/findings" element={<ProtectedRoute><FindingListView /></ProtectedRoute>} />
+
+      {/* My Tasks — vuln-lifecycle Assign + My Tasks (Task 4). Cross-project
+          by design, visible to every authenticated user (not role-gated -
+          anyone could be a developer-role assignee on some project). */}
+      <Route path="/my-tasks" element={<ProtectedRoute><MyTasksView /></ProtectedRoute>} />
 
       {/* SLA Policies — vuln-lifecycle Fingerprinting + Rescan Diff + SLA (Task 3).
           Standalone for now - Task 7 wires this into the Admin Console's

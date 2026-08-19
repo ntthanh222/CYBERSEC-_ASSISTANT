@@ -76,6 +76,33 @@ class FindingPage(Page[FindingItem]):
     pass
 
 
+class EligibleAssigneeItem(BaseModel):
+    """A project member eligible to be a Finding's assignee (Task 4) -
+    developer/security/owner project roles, never viewer. No local ``User``
+    table exists in this app (identity comes from Supabase ``auth.users``) -
+    same as ``ProjectMemberItem`` (Task 1), this deliberately returns only
+    ``user_id``/``project_role`` rather than inventing a display-name/email
+    resolution the rest of the app doesn't have either."""
+
+    user_id: UUID
+    project_role: Literal["developer", "security", "owner"]
+
+
+class EligibleAssigneeList(BaseModel):
+    items: list[EligibleAssigneeItem]
+
+
+class MyTaskItem(FindingItem):
+    """A ``FindingItem`` plus its parent project's name, for the
+    cross-project "My Tasks" view (Task 4)."""
+
+    project_name: str
+
+
+class MyTaskPage(Page[MyTaskItem]):
+    pass
+
+
 class FindingTransitionItem(BaseModel):
     id: UUID
     finding_id: UUID

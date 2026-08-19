@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database.models.finding import Finding, FindingTransition
+from backend.database.models.project import Project
 
 
 class FindingRepository:
@@ -150,6 +151,40 @@ class FindingRepository:
             sa.select(Finding).where(*filters).order_by(Finding.created_at.desc(), Finding.id)
         )
         return list(rows)
+
+    async def list_by_assignee(
+        self,
+        *,
+        user_id: uuid.UUID,
+        status: Optional[str],
+        severity: Optional[str],
+    ) -> Sequence[tuple[Finding, str]]:
+        """Every Finding assigned to ``user_id``, across every project,
+        joined with its parent ``Project.name`` for the cross-project "My
+        Tasks" view (Task 4) - authorization-safe by construction: the
+        ``assignee_user_id == user_id`` filter means a caller can only ever
+        see their own assignments regardless of their current project
+        membership state, see the Task 4 brief.
+
+        No pagination here, same reasoning as
+        ``list_all_for_project_unpaginated``: an ``overdue`` filter has no
+        SQL representation (``sla.is_overdue`` is pure Python), so the
+        service layer fetches every status/severity-matching row, filters by
+        ``is_overdue`` in Python, then paginates the filtered set.
+        """
+        filters: list[Any] = [Finding.assignee_user_id == user_id]
+        if status is not None:
+            filters.append(Finding.status == status)
+        if severity is not None:
+            filters.append(Finding.severity == severity)
+
+        rows = await self._session.execute(
+            sa.select(Finding, Project.name)
+            .join(Project, Project.id == Finding.project_id)
+            .where(*filters)
+            .order_by(Finding.created_at.desc(), Finding.id)
+        )
+        return [(row[0], row[1]) for row in rows.all()]
 
     async def touch_last_seen(self, finding: Finding, *, scan_run_id: uuid.UUID) -> Finding:
         finding.last_seen_scan_run_id = scan_run_id

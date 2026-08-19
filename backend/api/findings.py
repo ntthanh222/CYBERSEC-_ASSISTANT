@@ -25,6 +25,7 @@ from backend.database.models.finding import Finding
 from backend.database.models.project import ProjectMember
 from backend.database.session import get_rls_db
 from backend.schemas.findings import (
+    EligibleAssigneeList,
     FindingAssigneeUpdate,
     FindingCreate,
     FindingItem,
@@ -108,6 +109,30 @@ async def list_findings(
         "total": total,
         "page": pagination.page,
         "page_size": pagination.page_size,
+    }
+
+
+@router.get(
+    "/eligible-assignees",
+    summary="List eligible Finding assignees for this project",
+    description="Project members with project_role in (developer, security, owner) - the "
+    "same eligibility set FindingService.set_assignee validates against. Any project member "
+    "may view this (it powers the assignee picker).",
+    response_model=EligibleAssigneeList,
+    responses={**_UNAUTHORIZED, **_NOT_FOUND},
+)
+async def list_eligible_assignees(
+    project_id: uuid.UUID,
+    session: AsyncSession = Depends(get_rls_db),
+    _member: ProjectMember | None = Depends(get_project_member),
+) -> dict:
+    service = FindingService(session)
+    members = await service.list_eligible_assignees(project_id)
+    return {
+        "items": [
+            {"user_id": member.user_id, "project_role": member.project_role}
+            for member in members
+        ]
     }
 
 
@@ -204,12 +229,17 @@ async def transition_finding(
 @router.patch(
     "/{finding_id}/assignee",
     summary="Set a finding's assignee",
-    description="Task 2 scope: a bare setter, callable only by owner/security (or the "
-    "workspace-owner/admin bypass, or a global admin). No validation that the assignee is "
-    "actually a project developer member - Task 4 adds the full assign endpoint with that "
-    "validation.",
+    description="Callable only by owner/security (or the workspace-owner/admin bypass, or a "
+    "global admin). assignee_user_id must be an active project member with role developer, "
+    "security, or owner (never viewer) - see FindingService.set_assignee. Passing null always "
+    "succeeds (unassigning is always safe).",
     response_model=FindingItem,
-    responses={**_UNAUTHORIZED, **_FORBIDDEN, **_NOT_FOUND},
+    responses={
+        **_UNAUTHORIZED,
+        **_FORBIDDEN,
+        **_NOT_FOUND,
+        422: {"model": ErrorResponse, "description": "assignee_user_id is not an eligible project member."},
+    },
 )
 async def set_finding_assignee(
     project_id: uuid.UUID,

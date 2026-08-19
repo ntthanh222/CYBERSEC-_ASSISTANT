@@ -171,6 +171,7 @@ describe('Finding Detail View — real backend', () => {
   it('renders finding detail and offers transitions allowed for an owner', async () => {
     authFetchMock.mockImplementation((url: string) => {
       const u = String(url);
+      if (u.includes('/eligible-assignees')) return listResponse([]);
       if (u.includes('/members')) return listResponse([OWNER_MEMBER]);
       if (u.includes(`/findings/${FINDING_ID}`)) return jsonResponse(FINDING_OPEN);
       return jsonResponse({ error: 'not_found', message: 'not found' }, 404);
@@ -186,6 +187,7 @@ describe('Finding Detail View — real backend', () => {
   it('a false_positive transition requires a reason before submitting', async () => {
     authFetchMock.mockImplementation((url: string, init?: RequestInit) => {
       const u = String(url);
+      if (u.includes('/eligible-assignees')) return listResponse([]);
       if (u.includes('/members')) return listResponse([OWNER_MEMBER]);
       if (u.includes('/transition') && init?.method === 'POST') {
         const updated = { ...FINDING_OPEN, status: 'false_positive', resolution_reason: 'Benign.' };
@@ -202,5 +204,60 @@ describe('Finding Detail View — real backend', () => {
     // Reason input appears; submit is disabled until a reason is typed.
     const confirmButton = await screen.findByText('XÁC NHẬN');
     expect(confirmButton).toBeDisabled();
+  });
+
+  it('an owner sees the assignee picker and can assign an eligible developer', async () => {
+    const DEVELOPER_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    authFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/eligible-assignees')) {
+        return listResponse([{ user_id: DEVELOPER_ID, project_role: 'developer' }]);
+      }
+      if (u.includes('/members')) return listResponse([OWNER_MEMBER]);
+      if (u.includes('/assignee') && init?.method === 'PATCH') {
+        const updated = { ...FINDING_OPEN, assignee_user_id: DEVELOPER_ID };
+        return jsonResponse(updated);
+      }
+      if (u.includes(`/findings/${FINDING_ID}`)) return jsonResponse(FINDING_OPEN);
+      return jsonResponse({ error: 'not_found', message: 'not found' }, 404);
+    });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('assignee-select')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId('assignee-select'), { target: { value: DEVELOPER_ID } });
+    fireEvent.click(screen.getByTestId('assignee-save-button'));
+
+    await waitFor(() =>
+      expect(
+        authFetchMock.mock.calls.some(
+          ([url, init]) => String(url).includes('/assignee') && init?.method === 'PATCH',
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('shows a clear error when the backend rejects an ineligible assignee', async () => {
+    authFetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/eligible-assignees')) return listResponse([]);
+      if (u.includes('/members')) return listResponse([OWNER_MEMBER]);
+      if (u.includes('/assignee') && init?.method === 'PATCH') {
+        return jsonResponse(
+          { error: 'invalid_assignee', message: 'The target user is not an eligible assignee for this project.' },
+          422,
+        );
+      }
+      if (u.includes(`/findings/${FINDING_ID}`)) return jsonResponse(FINDING_OPEN);
+      return jsonResponse({ error: 'not_found', message: 'not found' }, 404);
+    });
+
+    renderDetail();
+    await waitFor(() => expect(screen.getByTestId('assignee-select')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('assignee-save-button'));
+
+    await waitFor(() =>
+      expect(screen.getByText(/not an eligible assignee/i)).toBeInTheDocument(),
+    );
   });
 });
