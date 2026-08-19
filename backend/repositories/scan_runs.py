@@ -41,6 +41,28 @@ class ScanRunRepository:
     async def get(self, scan_run_id: uuid.UUID) -> Optional[ScanRun]:
         return await self._session.scalar(sa.select(ScanRun).where(ScanRun.id == scan_run_id))
 
+    async def get_latest_completed(
+        self, *, project_id: uuid.UUID, target: str
+    ) -> Optional[ScanRun]:
+        """The most recent ``completed`` run for this exact ``(project_id,
+        target)`` pair - used by ``ScanOrchestrator.run_scan`` to
+        auto-chain ``previous_scan_run_id`` so rescanning "just works"
+        without the caller needing to track scan IDs (see Task 3 brief §2).
+        Matches on the raw ``target`` string (not the normalized
+        fingerprint target) since that is what a caller re-submits for a
+        rescan of "the same" target - normalization only ever applies inside
+        the fingerprint formula itself."""
+        return await self._session.scalar(
+            sa.select(ScanRun)
+            .where(
+                ScanRun.project_id == project_id,
+                ScanRun.target == target,
+                ScanRun.status == "completed",
+            )
+            .order_by(ScanRun.completed_at.desc(), ScanRun.created_at.desc())
+            .limit(1)
+        )
+
     async def list_for_project(
         self, *, project_id: uuid.UUID, page: int, page_size: int
     ) -> tuple[Sequence[ScanRun], int]:

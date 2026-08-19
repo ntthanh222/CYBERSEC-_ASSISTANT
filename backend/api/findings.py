@@ -32,6 +32,7 @@ from backend.schemas.findings import (
     FindingTransitionRequest,
 )
 from backend.schemas.health import ErrorResponse
+from backend.services import sla as sla_service
 from backend.services.finding import FindingService
 
 router = APIRouter(
@@ -63,6 +64,7 @@ def _finding_dict(record: Finding) -> dict[str, Any]:
         "cve_id": record.cve_id,
         "assignee_user_id": record.assignee_user_id,
         "deadline": record.deadline,
+        "is_overdue": sla_service.is_overdue(record),
         "verification_notes": record.verification_notes,
         "resolution_reason": record.resolution_reason,
         "first_seen_scan_run_id": record.first_seen_scan_run_id,
@@ -76,8 +78,8 @@ def _finding_dict(record: Finding) -> dict[str, Any]:
 @router.get(
     "",
     summary="List findings",
-    description="Filterable by status, severity, and assignee_user_id. Any project member "
-    "(including viewer/developer) may view this.",
+    description="Filterable by status, severity, assignee_user_id, and overdue. Any project "
+    "member (including viewer/developer) may view this.",
     response_model=FindingPage,
     responses={**_UNAUTHORIZED, **_NOT_FOUND},
 )
@@ -86,6 +88,7 @@ async def list_findings(
     status: Optional[str] = Query(default=None),
     severity: Optional[str] = Query(default=None),
     assignee_user_id: Optional[uuid.UUID] = Query(default=None),
+    overdue: Optional[bool] = Query(default=None, description="Filter to overdue (or not-overdue) findings only."),
     pagination: PageParams = Depends(page_params),
     session: AsyncSession = Depends(get_rls_db),
     _member: ProjectMember | None = Depends(get_project_member),
@@ -96,6 +99,7 @@ async def list_findings(
         status=status,
         severity=severity,
         assignee_user_id=assignee_user_id,
+        overdue=overdue,
         page=pagination.page,
         page_size=pagination.page_size,
     )

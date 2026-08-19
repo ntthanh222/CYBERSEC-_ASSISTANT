@@ -18,6 +18,7 @@ from backend.database.models.report import ReportRecord
 from backend.database.models.scan import ScanRun
 from backend.database.models.scan_history import SecurityScanRecord
 from backend.database.models.security_news import SecurityNewsArticle
+from backend.database.models.sla_policy import SlaPolicy
 from backend.database.models.threat_intel import ThreatIOC
 from backend.database.models.vulnerability import VulnerabilityPatchTask, VulnerabilityRecord
 from backend.database.models.workspace import Workspace, WorkspaceMember
@@ -52,4 +53,5 @@ __all__ = [
     "ScanRun",
     "Finding",
     "FindingTransition",
+    "SlaPolicy",
 ]

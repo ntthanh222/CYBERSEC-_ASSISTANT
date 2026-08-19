@@ -8,7 +8,6 @@ enforces.
 """
 from __future__ import annotations
 
-import hashlib
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -30,14 +29,10 @@ from backend.repositories.findings import FindingRepository
 from backend.repositories.project_members import ProjectMemberRepository
 from backend.repositories.rbac import RbacRepository
 from backend.services import finding_state_machine as fsm
+from backend.services import sla as sla_service
+from backend.services.finding_fingerprint import compute_fingerprint
 
-
-def compute_fingerprint(*, project_id: uuid.UUID, rule_id: str, category: str, target: str) -> str:
-    """Task 2's simplified fingerprint formula - see the ``Finding`` model
-    docstring. Task 3 adds target normalization on top of this same shape
-    without needing a schema change."""
-    raw = f"{project_id}:{rule_id}:{category}:{target}"
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+__all__ = ["compute_fingerprint", "FindingService"]
 
 
 class FindingService:
@@ -62,15 +57,32 @@ class FindingService:
         assignee_user_id: Optional[uuid.UUID],
         page: int,
         page_size: int,
+        overdue: Optional[bool] = None,
     ):
-        return await self._findings.list_for_project(
+        if overdue is None:
+            return await self._findings.list_for_project(
+                project_id=project_id,
+                status=status,
+                severity=severity,
+                assignee_user_id=assignee_user_id,
+                page=page,
+                page_size=page_size,
+            )
+
+        # `overdue` has no SQL representation (see
+        # FindingRepository.list_all_for_project_unpaginated's docstring) -
+        # fetch every status/severity/assignee-matching row, filter by the
+        # pure-Python sla.is_overdue, then paginate the filtered set here.
+        candidates = await self._findings.list_all_for_project_unpaginated(
             project_id=project_id,
             status=status,
             severity=severity,
             assignee_user_id=assignee_user_id,
-            page=page,
-            page_size=page_size,
         )
+        matched = [item for item in candidates if sla_service.is_overdue(item) == overdue]
+        total = len(matched)
+        start = (page - 1) * page_size
+        return matched[start : start + page_size], total
 
     async def create_manual(
         self,
@@ -189,6 +201,20 @@ class FindingService:
             # resolution_reason records *why* the finding was dismissed, not
             # every transition's incidental reason text.
             finding.resolution_reason = reason
+        if to_status == "confirmed":
+            # The ONLY place Finding.deadline is ever set (Task 3 SLA
+            # service) - "deadline được set khi open->confirmed" in the
+            # plan. A finding can re-enter confirmed from reopened too
+            # (reopened->confirmed is a valid edge); each entry into
+            # confirmed recomputes and restarts the SLA clock rather than
+            # only doing so the first time.
+            confirmed_at = datetime.now(timezone.utc)
+            finding.deadline = await sla_service.compute_deadline(
+                project_id=finding.project_id,
+                severity=finding.severity,
+                confirmed_at=confirmed_at,
+                session=self._session,
+            )
         await self._findings.add_transition(
             finding_id=finding.id,
             from_status=from_status,
@@ -217,5 +243,68 @@ class FindingService:
             result="success",
             actor=actor_label,
             metadata={"from_status": from_status, "to_status": to_status},
+        )
+        return finding
+
+    async def auto_reopen_for_rescan(
+        self,
+        finding: Finding,
+        *,
+        scan_run_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+    ) -> Finding:
+        """The one automatic, system-triggered transition in the whole
+        Finding lifecycle: ``fixed`` -> ``reopened`` when a rescan's diff
+        (``backend.services.rescan_diff``) finds a ``fixed`` Finding's
+        fingerprint has reappeared. See the Task 3 brief's "System actor"
+        note: there is no separate "system" identity in this codebase, so
+        the scan-triggering user (``ScanRun.triggered_by_user_id``) is
+        recorded as the ``FindingTransition.actor_user_id`` - the most
+        honest available audit trail for an automatic transition.
+
+        Deliberately does **not** call ``finding_state_machine.validate_transition``
+        - that function's role checks answer "may THIS HUMAN perform this
+        transition?", a question that does not apply here (nobody is acting,
+        the rescan diff is). It still re-checks the edge itself is real via
+        ``ALLOWED_TRANSITIONS`` (defense in depth against a future caller
+        error) and writes the exact same ``FindingTransition`` row + audit
+        log entry a human-initiated transition would, so the audit trail is
+        indistinguishable in shape from any other transition - only its
+        ``reason`` ("rescan_regression") and the caller-supplied ``meta``
+        reveal it was automatic.
+
+        Does not commit - the caller (``RescanDiff``, invoked from
+        ``ScanOrchestrator.run_scan``) commits once at the end of the whole
+        scan, same as every other write in that transaction.
+        """
+        from_status = finding.status
+        to_status = "reopened"
+        if to_status not in fsm.ALLOWED_TRANSITIONS.get(from_status, frozenset()):
+            raise InvalidRequestError(
+                f"auto_reopen_for_rescan called on an invalid edge "
+                f"'{from_status}' -> '{to_status}'."
+            )
+
+        finding = await self._findings.set_status(finding, status=to_status)
+        await self._findings.add_transition(
+            finding_id=finding.id,
+            from_status=from_status,
+            to_status=to_status,
+            actor_user_id=actor_user_id,
+            reason="rescan_regression",
+            meta={"scan_run_id": str(scan_run_id), "diff_label": "reopened_regression"},
+        )
+        log_audit_event(
+            event_type="finding",
+            action="finding_transition",
+            resource=f"finding:{finding.id}",
+            result="success",
+            actor="system:rescan_diff",
+            metadata={
+                "from_status": from_status,
+                "to_status": to_status,
+                "scan_run_id": str(scan_run_id),
+                "reason": "rescan_regression",
+            },
         )
         return finding

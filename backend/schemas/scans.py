@@ -12,6 +12,12 @@ ScanType = Literal["url_scan"]
 
 class ScanRunCreate(BaseModel):
     target: str = Field(min_length=1, max_length=2048, examples=["https://example.com"])
+    #: Optional override of the auto-detected "previous scan" used for
+    #: rescan diffing (Task 3). Left unset, the orchestrator auto-chains to
+    #: the most recent completed scan of the same project+target - this
+    #: field exists only for a caller that needs to diff against a
+    #: specific, non-default prior run.
+    previous_scan_run_id: UUID | None = None
 
 
 class ScanRunItem(BaseModel):

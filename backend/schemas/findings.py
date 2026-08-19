@@ -59,6 +59,10 @@ class FindingItem(BaseModel):
     cve_id: Optional[str] = None
     assignee_user_id: Optional[UUID] = None
     deadline: Optional[UtcDatetime] = None
+    #: Computed at read time (backend.services.sla.is_overdue) - never a
+    #: stored column, so it can never drift out of sync with "now" or the
+    #: finding's current status. See backend/api/findings.py's _finding_dict.
+    is_overdue: bool = False
     verification_notes: str
     resolution_reason: Optional[str] = None
     first_seen_scan_run_id: Optional[UUID] = None

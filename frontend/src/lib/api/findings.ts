@@ -30,6 +30,9 @@ export interface Finding {
   cve_id: string | null;
   assignee_user_id: string | null;
   deadline: string | null;
+  /** Computed at read time (backend.services.sla.is_overdue) - never a
+   * stored column. */
+  is_overdue: boolean;
   verification_notes: string;
   resolution_reason: string | null;
   first_seen_scan_run_id: string | null;
@@ -68,6 +71,7 @@ export interface FindingFilters {
   status?: FindingStatus;
   severity?: FindingSeverity;
   assigneeUserId?: string;
+  overdue?: boolean;
 }
 
 export function listFindings(projectId: string, filters: FindingFilters = {}): Promise<Page<Finding>> {
@@ -77,6 +81,7 @@ export function listFindings(projectId: string, filters: FindingFilters = {}): P
   if (filters.status) params.set('status', filters.status);
   if (filters.severity) params.set('severity', filters.severity);
   if (filters.assigneeUserId) params.set('assignee_user_id', filters.assigneeUserId);
+  if (filters.overdue !== undefined) params.set('overdue', String(filters.overdue));
   return apiGet<Page<Finding>>(`/api/projects/${projectId}/findings?${params.toString()}`);
 }
 

@@ -31,6 +31,8 @@ from backend.api.reports import router as reports_router
 from backend.api.scan_history import router as scan_history_router
 from backend.api.scans import router as scans_router
 from backend.api.security_news import router as security_news_router
+from backend.api.sla_policies import admin_router as sla_policies_admin_router
+from backend.api.sla_policies import project_router as sla_policies_project_router
 from backend.api.system import router as system_router
 from backend.api.threat_intel import router as threat_intel_router
 from backend.api.tools import router as tools_router
@@ -219,6 +221,8 @@ app.include_router(workspaces_router)
 app.include_router(projects_router)
 app.include_router(scans_router)
 app.include_router(findings_router)
+app.include_router(sla_policies_admin_router)
+app.include_router(sla_policies_project_router)
 
 
 def _request_id_from(request: Request) -> str:

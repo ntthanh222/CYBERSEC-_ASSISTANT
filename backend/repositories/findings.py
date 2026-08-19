@@ -67,6 +67,27 @@ class FindingRepository:
             )
         )
 
+    async def get_live_as_of(
+        self, *, project_id: uuid.UUID, scan_run_id: uuid.UUID
+    ) -> Sequence[Finding]:
+        """Findings this project's rescan diff (``backend.services.rescan_diff``)
+        treats as "live" as of ``scan_run_id``: their fingerprint was last
+        confirmed present by that exact scan run, AND their status isn't one
+        that means "this fingerprint isn't actually a live issue any more"
+        (``closed`` or ``false_positive`` - see the Task 3 brief's decision
+        table for why ``accepted_risk`` is deliberately NOT excluded here:
+        an accepted-risk finding that reappears in the very next scan is
+        still "live" in the sense that touching its ``last_seen_scan_run_id``
+        is harmless and expected, it just must never auto-transition)."""
+        rows = await self._session.scalars(
+            sa.select(Finding).where(
+                Finding.project_id == project_id,
+                Finding.last_seen_scan_run_id == scan_run_id,
+                Finding.status.notin_(("closed", "false_positive")),
+            )
+        )
+        return list(rows)
+
     async def list_for_project(
         self,
         *,
@@ -96,6 +117,39 @@ class FindingRepository:
             .limit(page_size)
         )
         return list(rows), int(total or 0)
+
+    async def list_all_for_project_unpaginated(
+        self,
+        *,
+        project_id: uuid.UUID,
+        status: Optional[str],
+        severity: Optional[str],
+        assignee_user_id: Optional[uuid.UUID],
+    ) -> Sequence[Finding]:
+        """Every matching row, no pagination - used only by
+        ``FindingService.list`` when an ``overdue`` filter is requested.
+
+        ``is_overdue`` is a deliberately pure, no-DB Python function (see
+        ``backend.services.sla``) rather than a stored/queryable column, so
+        an ``overdue`` filter cannot be expressed as SQL WHERE clause here -
+        it is applied by the caller after fetching the (status/severity/
+        assignee-filtered) candidate set, which then re-paginates in Python.
+        This is fine at this application's scale (no async job/queue,
+        synchronous MVP scans per the plan) but would need a materialized/
+        indexed approach if Finding volume ever grew large enough for this
+        full-scan-then-filter approach to matter."""
+        filters: list[Any] = [Finding.project_id == project_id]
+        if status is not None:
+            filters.append(Finding.status == status)
+        if severity is not None:
+            filters.append(Finding.severity == severity)
+        if assignee_user_id is not None:
+            filters.append(Finding.assignee_user_id == assignee_user_id)
+
+        rows = await self._session.scalars(
+            sa.select(Finding).where(*filters).order_by(Finding.created_at.desc(), Finding.id)
+        )
+        return list(rows)
 
     async def touch_last_seen(self, finding: Finding, *, scan_run_id: uuid.UUID) -> Finding:
         finding.last_seen_scan_run_id = scan_run_id

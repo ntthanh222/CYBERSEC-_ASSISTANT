@@ -62,6 +62,9 @@ import { ProjectFormView } from '../features/projects/ProjectFormView';
 import { FindingListView } from '../features/findings/FindingListView';
 import { FindingDetailView } from '../features/findings/FindingDetailView';
 
+// Vuln-lifecycle foundation — Task 3 (SLA policies)
+import { SlaPolicyView } from '../features/sla/SlaPolicyView';
+
 // Router protection wrapper
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isLoading } = useAuth();
@@ -161,6 +164,11 @@ export const AppRoutes: React.FC = () => {
       {/* Findings — vuln-lifecycle Scan -> Finding pipeline (Task 2) */}
       <Route path="/projects/:id/findings/:findingId" element={<ProtectedRoute><FindingDetailView /></ProtectedRoute>} />
       <Route path="/projects/:id/findings" element={<ProtectedRoute><FindingListView /></ProtectedRoute>} />
+
+      {/* SLA Policies — vuln-lifecycle Fingerprinting + Rescan Diff + SLA (Task 3).
+          Standalone for now - Task 7 wires this into the Admin Console's
+          SLA/Policies tab nav. */}
+      <Route path="/projects/:id/sla-policies" element={<ProtectedRoute><SlaPolicyView /></ProtectedRoute>} />
 
       {/* Assets — Phase 3 */}
       <Route path="/assets" element={<ProtectedRoute><AssetInventoryView /></ProtectedRoute>} />

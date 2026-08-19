@@ -70,7 +70,12 @@ async def trigger_scan(
     _member: ProjectMember | None = Depends(require_project_role(*_TRIGGER_ROLES)),
 ) -> dict:
     orchestrator = ScanOrchestrator(session)
-    record = await orchestrator.run_scan(project_id=project_id, target=body.target, actor=app_user)
+    record = await orchestrator.run_scan(
+        project_id=project_id,
+        target=body.target,
+        actor=app_user,
+        previous_scan_run_id=body.previous_scan_run_id,
+    )
     return _scan_dict(record)
 
 
