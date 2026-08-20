@@ -60,9 +60,8 @@ def test_kev_and_internet_facing_is_patch_now_with_unknown_version_match():
 
 def test_kev_without_internet_facing_does_not_trigger_rule_2():
     label, _, _ = assess(2.0, 0.01, True, False, "low", True)
-    assert label != "patch_now" or True  # rule 3/5 may still reach patch_now via other paths
-    # Explicitly assert rule 2's own condition is not what fired:
-    # with cvss=2.0 (<9.0), rule 3 cannot fire either, so this must NOT be patch_now.
+    # Rule 2 requires internet_facing too; with cvss=2.0 (<9.0), rule 3
+    # cannot fire either, so this must NOT be patch_now.
     assert label != "patch_now"
 
 

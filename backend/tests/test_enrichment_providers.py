@@ -281,6 +281,38 @@ async def test_kev_provider_caches_the_whole_catalog_across_multiple_cve_checks(
     assert redis.set_calls == 1
 
 
+async def test_kev_provider_does_not_cache_a_failed_fetch(monkeypatch):
+    """A catalog fetch failure must fail open (is_kev=False) for that one
+    call only - it must NOT get written to the cache, or a single transient
+    CISA outage would poison every subsequent is_kev check to False for the
+    full kev_cache_ttl_seconds window (hours), even after CISA recovers.
+    Mirrors EpssProvider's "a miss is never cached" behaviour."""
+    redis = FakeRedis()
+    monkeypatch.setattr("backend.providers.enrichment.kev.get_redis", lambda: redis)
+    calls = {"n": 0}
+
+    def failing_handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ConnectError("connection refused", request=request)
+
+    provider = KevProvider(transport=_transport(failing_handler))
+    assert await provider.is_kev("CVE-2021-44228") is False
+    assert calls["n"] == 1
+    assert redis.set_calls == 0  # the failure itself was never cached
+
+    # The feed "recovers": a second provider instance (fresh network client,
+    # same fake Redis) must retry the network rather than serve a cached
+    # empty-catalog result from the earlier failure.
+    def succeeding_handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=_SAMPLE_KEV_RESPONSE)
+
+    recovered_provider = KevProvider(transport=_transport(succeeding_handler))
+    assert await recovered_provider.is_kev("CVE-2021-44228") is True
+    assert calls["n"] == 2  # the network was hit again, not skipped via a cached miss
+    assert redis.set_calls == 1  # the real, successful catalog is cached now
+
+
 async def test_kev_provider_a_broken_cache_does_not_fail_the_lookup(monkeypatch):
     redis = FakeRedis(fail=True)
     monkeypatch.setattr("backend.providers.enrichment.kev.get_redis", lambda: redis)
