@@ -151,10 +151,11 @@ class AssistantService:
         self._session = session
         #: Non-RLS session for AppDataToolRouter's project-authorization
         #: check (Task 8) - see AppDataToolRouter.__init__'s authz_session
-        #: docstring. ``session`` here is normally RLS-scoped (the
-        #: /api/chatbot/chat route's get_rls_db), so this must be a
-        #: separate, independently-injected get_db session, not derived
-        #: from ``session``.
+        #: docstring (including the FastAPI dependency-cache pitfall noted
+        #: there) for why this must be a genuinely separate,
+        #: independently-injected get_db session, never derived from or
+        #: equal to ``session`` here (``session`` is normally RLS-scoped -
+        #: the /api/chatbot/chat route's get_rls_db).
         self._authz_session = authz_session
         self._repo = ConversationRepository(session)
         self._provider = provider or get_llm_provider()

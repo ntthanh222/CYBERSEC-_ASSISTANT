@@ -26,7 +26,7 @@ from backend.database.models.finding import Finding
 from backend.database.models.project import Project, ProjectMember
 from backend.database.models.sla_policy import SlaPolicy
 from backend.database.models.workspace import Workspace, WorkspaceMember
-from backend.services.rag.entity_extractor import ExtractedEntities
+from backend.services.rag.entity_extractor import ExtractedEntities, extract_entities
 from backend.services.rag.project_context import ACCESS_DENIED_MESSAGE
 from backend.services.rag.tool_router import AppDataToolRouter
 
@@ -710,6 +710,59 @@ async def test_cve_priority_falls_back_to_generic_cve_lookup_when_no_assessment_
         assert "Test-only CVE record" in result.content
         # ...while noting no project-specific assessment exists yet.
         assert "chưa có đánh giá ưu tiên" in result.content.lower()
+
+
+async def test_cve_priority_fallback_passes_the_real_query_through_dispatch(
+    db_sessionmaker, monkeypatch
+):
+    """Regression test for the re-review finding on the CVE-fallback fix
+    itself: the fallback must pass the caller's REAL message text to
+    ``_route_cve``, not an empty string - otherwise ``_route_cve``'s own
+    plain-language/follow-up composition (``_CVE_PLAIN_LANGUAGE_MARKERS``,
+    ``_classify_cve_followup``) can never fire once a project is selected.
+    Exercised through ``try_route`` -> ``_route_project_scoped`` (the real
+    dispatch path that had the bug), not by calling ``_route_cve_priority``
+    directly with an explicit ``query`` kwarg."""
+
+    async def fake_get(self, raw_cve_id, *, actor):
+        return {
+            "cve_id": raw_cve_id,
+            "description": "Test-only CVE record from mocked provider.",
+            "published_at": None,
+            "modified_at": None,
+            "cvss_score": 7.5,
+            "severity": "high",
+            "vector": None,
+            "affected_products": [],
+            "references": [],
+            "source": "nvd",
+        }
+
+    monkeypatch.setattr("backend.services.rag.tool_router.CveLookupService.get", fake_get)
+
+    async with db_sessionmaker() as session:
+        creator_id = uuid.uuid4()
+        _ws, project = await _seed_workspace_and_project(session, creator_id=creator_id)
+        member_id = uuid.uuid4()
+        await _add_member(session, project_id=project.id, user_id=member_id)
+        # Deliberately no CveAssessment seeded, so the fallback path fires.
+
+        router = AppDataToolRouter(session)
+        message = "giải thích CVE-2099-99999 cho người mới, dễ hiểu"
+        result = await router.try_route(
+            message,
+            extract_entities(message),
+            user_id=member_id,
+            intent="cve_question",
+            project_id=project.id,
+            caller=_app_user(member_id),
+        )
+
+        assert result.handled is True
+        # If `query` had been dropped (passed as ""), the plain-language
+        # marker in the message could never be detected, and _route_cve
+        # would return its default full technical dump instead.
+        assert "giải thích đơn giản" in result.content.lower()
 
 
 async def test_try_route_incident_response_wins_over_project_scoped_dispatch(db_sessionmaker):

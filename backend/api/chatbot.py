@@ -104,11 +104,25 @@ async def chat(
     # authz_session docstring. Must not be the RLS-scoped `session` above:
     # Postgres RLS on `projects` already hides rows the caller isn't a
     # member of, which would make the "forbidden" (vs "not found") branch
-    # unreachable if the check ran on that session instead. Resolves to the
-    # same underlying dependency `get_app_user` itself already depends on,
-    # so this adds no extra DB connection beyond what the route already
-    # opens for role resolution.
-    authz_session: AsyncSession = Depends(get_db),
+    # unreachable if the check ran on that session instead.
+    #
+    # `use_cache=False` is load-bearing, not decorative: `get_rls_db` is
+    # itself implemented as `get_rls_db(session: AsyncSession =
+    # Depends(get_db))` (see backend/database/session.py), and FastAPI
+    # caches a dependency's resolved value per request BY CALLABLE IDENTITY
+    # (default `use_cache=True`). Without `use_cache=False` here, this
+    # `Depends(get_db)` and `get_rls_db`'s own internal `Depends(get_db)`
+    # would resolve to the exact same cached session object - the one
+    # `get_rls_db` then runs `SET LOCAL ROLE authenticated` on - making
+    # `authz_session is session` at runtime despite the two separate
+    # parameters (a real defect found in this task's first fix attempt,
+    # see the Task 8 report). `use_cache=False` forces a genuinely fresh
+    # `get_db()` call, so `authz_session` is a distinct, never-RLS-touched
+    # session/connection. Verified by
+    # test_chat_route_forbidden_message_reachable_with_real_rls_session_wiring
+    # in test_assistant_project_context.py, which exercises this exact
+    # route via TestClient (not a hand-built AppDataToolRouter).
+    authz_session: AsyncSession = Depends(get_db, use_cache=False),
     user: AuthenticatedUser = Depends(get_current_user),
     app_user: AppUser = Depends(get_app_user),
     actor: str = Depends(get_current_actor),

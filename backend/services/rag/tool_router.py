@@ -96,6 +96,21 @@ class AppDataToolRouter:
         #: Falls back to ``session`` when not supplied (e.g. a test/caller
         #: with only one, already-non-RLS session) - callers that DO have a
         #: separate RLS session must pass it explicitly.
+        #:
+        #: Caller beware if wiring this up via FastAPI ``Depends``: a plain
+        #: second ``Depends(get_db)`` alongside a route's
+        #: ``Depends(get_rls_db)`` parameter is NOT automatically a distinct
+        #: session, because ``get_rls_db`` is itself implemented as
+        #: ``get_rls_db(session: AsyncSession = Depends(get_db))`` and
+        #: FastAPI caches a dependency's resolved value per request by
+        #: callable identity (default ``use_cache=True``) - both
+        #: ``Depends(get_db)`` call sites would collapse onto the same
+        #: cached, already-RLS-touched session object, defeating this
+        #: parameter's entire purpose. ``backend/api/chatbot.py``'s
+        #: ``/chat`` route uses ``Depends(get_db, use_cache=False)`` to
+        #: force a genuinely separate session - see that route's comment
+        #: for the full explanation, found the hard way in this task's
+        #: first fix attempt (see the Task 8 report).
         self._authz_session = authz_session if authz_session is not None else session
         self._asset_repo = AssetRepository(session)
         self._incident_repo = IncidentRepository(session)
@@ -480,7 +495,9 @@ class AppDataToolRouter:
             return await self._route_policy(project_id, caller)
 
         if entities.cves:
-            return await self._route_cve_priority(project_id, entities.cves[0], caller)
+            return await self._route_cve_priority(
+                project_id, entities.cves[0], caller, query=text
+            )
 
         if any(term in text for term in self._PROJECT_STATUS_TERMS):
             return await self._route_project_status(project_id, caller)
@@ -805,7 +822,7 @@ class AppDataToolRouter:
         )
 
     async def _route_cve_priority(
-        self, project_id: uuid.UUID, cve_id: str, caller: AppUser
+        self, project_id: uuid.UUID, cve_id: str, caller: AppUser, *, query: str = ""
     ) -> ToolRouteResult:
         """Answers "how do I fix this CVE?" / priority questions for a
         specific CVE in this project - surfaces Task 6's already-computed
@@ -825,8 +842,13 @@ class AppDataToolRouter:
             # same as "no CVE information available" - fall back to the
             # existing, unmodified _route_cve so the caller still gets real
             # NVD-backed CVE data (description/CVSS/etc.), with a note that
-            # no project-specific assessment has been run yet.
-            generic_result = await self._route_cve(normalized_cve, query="")
+            # no project-specific assessment has been run yet. Passes the
+            # caller's real `query` text through (a re-review fix: the
+            # first attempt at this fallback passed an empty string, which
+            # silently disabled _route_cve's own plain-language/follow-up
+            # composition - _CVE_PLAIN_LANGUAGE_MARKERS,
+            # _classify_cve_followup - whenever a project was selected).
+            generic_result = await self._route_cve(normalized_cve, query=query)
             if generic_result.handled:
                 note = (
                     f"\n\n_(Project này chưa có đánh giá ưu tiên CVE Risk Prioritization "
