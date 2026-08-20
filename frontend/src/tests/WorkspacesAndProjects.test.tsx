@@ -161,6 +161,23 @@ describe('Project Detail View — real backend', () => {
       const u = String(url);
       if (u.includes(`/api/projects/${PROJECT_1.id}/members`)) return listResponse([]);
       if (u.includes(`/api/projects/${PROJECT_1.id}/findings`)) return listResponse([]);
+      if (u.includes(`/api/projects/${PROJECT_1.id}/dashboard`)) {
+        return jsonResponse({
+          project_id: PROJECT_1.id,
+          security_score: 100,
+          open_findings: 0,
+          open_by_severity: { critical: 0, high: 0, medium: 0, low: 0 },
+          waiting_verify: 0,
+          overdue: 0,
+          fixed_this_week: 0,
+          latest_scan: null,
+          security_trend: [],
+          top_risks: [],
+          latest_findings: [],
+          assigned_open: 0,
+          assigned_open_by_assignee: [],
+        });
+      }
       if (u.includes(`/api/projects/${PROJECT_1.id}`)) return jsonResponse(PROJECT_1);
       return jsonResponse({ error: 'not_found', message: 'not found' }, 404);
     });
@@ -168,6 +185,7 @@ describe('Project Detail View — real backend', () => {
     renderProjectDetail(PROJECT_1.id);
     await waitFor(() => expect(screen.getByTestId('project-tab-security')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('project-tab-security'));
+    await waitFor(() => expect(screen.getByTestId('security-dashboard')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId('finding-list-empty')).toBeInTheDocument());
   });
 });

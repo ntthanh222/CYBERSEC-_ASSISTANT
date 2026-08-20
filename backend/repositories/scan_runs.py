@@ -78,6 +78,33 @@ class ScanRunRepository:
         )
         return list(rows), int(total or 0)
 
+    async def get_latest_for_project(self, *, project_id: uuid.UUID) -> Optional[ScanRun]:
+        """The most recent ``ScanRun`` for this project, any status/target -
+        used by the Task 5 security dashboard's "Latest Scan" summary, unlike
+        ``get_latest_completed`` which is scoped to a specific target and
+        only ``completed`` runs."""
+        return await self._session.scalar(
+            sa.select(ScanRun)
+            .where(ScanRun.project_id == project_id)
+            .order_by(ScanRun.created_at.desc())
+            .limit(1)
+        )
+
+    async def list_recent_completed(
+        self, *, project_id: uuid.UUID, limit: int
+    ) -> Sequence[ScanRun]:
+        """The ``limit`` most recent ``completed`` scan runs for this
+        project, oldest-first - feeds the Task 5 dashboard's "Security
+        Trend" series (each point derived from that run's real, stored
+        ``summary`` severity counts, nothing interpolated)."""
+        rows = await self._session.scalars(
+            sa.select(ScanRun)
+            .where(ScanRun.project_id == project_id, ScanRun.status == "completed")
+            .order_by(ScanRun.completed_at.desc())
+            .limit(limit)
+        )
+        return list(reversed(list(rows)))
+
     async def mark_completed(
         self, scan_run: ScanRun, *, completed_at: datetime, summary: dict[str, Any]
     ) -> ScanRun:

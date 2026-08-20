@@ -266,3 +266,137 @@ class FindingRepository:
             .order_by(FindingTransition.created_at.asc())
         )
         return list(rows)
+
+    # -- Task 5: project security dashboard aggregations ------------------
+    # Every method below is a real aggregate query over Finding/
+    # FindingTransition for one project - no field on the dashboard is
+    # computed from anything but these queries (see
+    # backend.services.project_dashboard.ProjectDashboardService).
+
+    async def count_open_by_severity(self, *, project_id: uuid.UUID) -> dict[str, int]:
+        """Open-finding counts (status not in ``TERMINAL_STATUSES``, mirroring
+        ``sla.TERMINAL_STATUSES``/the dashboard's "Open Findings" definition)
+        grouped by severity in one query, rather than one query per severity.
+        Always returns all four severities (0 for any with no open findings)."""
+        rows = await self._session.execute(
+            sa.select(Finding.severity, sa.func.count())
+            .where(
+                Finding.project_id == project_id,
+                Finding.status.notin_(TERMINAL_STATUSES),
+            )
+            .group_by(Finding.severity)
+        )
+        counts = {severity: 0 for severity in ("low", "medium", "high", "critical")}
+        for severity, count in rows.all():
+            counts[severity] = int(count)
+        return counts
+
+    async def count_by_status(self, *, project_id: uuid.UUID, status: str) -> int:
+        total = await self._session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Finding)
+            .where(Finding.project_id == project_id, Finding.status == status)
+        )
+        return int(total or 0)
+
+    async def count_overdue(self, *, project_id: uuid.UUID) -> int:
+        """Mirrors the exact SQL overdue predicate ``list_by_assignee`` uses
+        (Task 4 review fix) and ``sla.is_overdue``'s definition: a non-null
+        ``deadline`` in the past, on a Finding whose status isn't terminal."""
+        total = await self._session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Finding)
+            .where(
+                Finding.project_id == project_id,
+                Finding.deadline.is_not(None),
+                Finding.status.notin_(TERMINAL_STATUSES),
+                Finding.deadline < datetime.now(timezone.utc),
+            )
+        )
+        return int(total or 0)
+
+    async def count_assigned_open(self, *, project_id: uuid.UUID) -> int:
+        total = await self._session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Finding)
+            .where(
+                Finding.project_id == project_id,
+                Finding.assignee_user_id.is_not(None),
+                Finding.status.notin_(TERMINAL_STATUSES),
+            )
+        )
+        return int(total or 0)
+
+    async def count_assigned_open_by_assignee(
+        self, *, project_id: uuid.UUID
+    ) -> dict[uuid.UUID, int]:
+        rows = await self._session.execute(
+            sa.select(Finding.assignee_user_id, sa.func.count())
+            .where(
+                Finding.project_id == project_id,
+                Finding.assignee_user_id.is_not(None),
+                Finding.status.notin_(TERMINAL_STATUSES),
+            )
+            .group_by(Finding.assignee_user_id)
+        )
+        return {assignee_id: int(count) for assignee_id, count in rows.all()}
+
+    #: Severity rank used to order "top risks" critical-first - lower is
+    #: more severe, matching FINDING_SEVERITIES' worst-to-best ordering.
+    _SEVERITY_RANK = sa.case(
+        (Finding.severity == "critical", 0),
+        (Finding.severity == "high", 1),
+        (Finding.severity == "medium", 2),
+        (Finding.severity == "low", 3),
+        else_=4,
+    )
+
+    async def list_top_risks(self, *, project_id: uuid.UUID, limit: int) -> Sequence[Finding]:
+        """The ``limit`` open findings ordered critical-first, then
+        most-overdue-first as a tiebreak within the same severity - an
+        earlier (more overdue, or simply sooner) ``deadline`` sorts first,
+        and findings with no deadline at all (never overdue) sort last, via
+        ``NULLS LAST`` semantics on ascending deadline order."""
+        rows = await self._session.scalars(
+            sa.select(Finding)
+            .where(
+                Finding.project_id == project_id,
+                Finding.status.notin_(TERMINAL_STATUSES),
+            )
+            .order_by(
+                self._SEVERITY_RANK,
+                sa.case((Finding.deadline.is_(None), 1), else_=0),
+                Finding.deadline.asc(),
+                Finding.created_at.desc(),
+            )
+            .limit(limit)
+        )
+        return list(rows)
+
+    async def list_latest(self, *, project_id: uuid.UUID, limit: int) -> Sequence[Finding]:
+        rows = await self._session.scalars(
+            sa.select(Finding)
+            .where(Finding.project_id == project_id)
+            .order_by(Finding.created_at.desc(), Finding.id.desc())
+            .limit(limit)
+        )
+        return list(rows)
+
+    async def count_transitions_to_status_since(
+        self, *, project_id: uuid.UUID, to_status: str, since: datetime
+    ) -> int:
+        """Count of ``FindingTransition`` rows for this project's findings
+        with ``to_status`` reached at/after ``since`` - drives the dashboard's
+        "Fixed This Week" metric (see ``ProjectDashboardService`` for which
+        ``to_status`` is used and why)."""
+        total = await self._session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FindingTransition)
+            .join(Finding, Finding.id == FindingTransition.finding_id)
+            .where(
+                Finding.project_id == project_id,
+                FindingTransition.to_status == to_status,
+                FindingTransition.created_at >= since,
+            )
+        )
+        return int(total or 0)

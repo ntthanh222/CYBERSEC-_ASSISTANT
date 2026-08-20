@@ -20,6 +20,7 @@ from backend.core.project_authorization import get_project_member, require_proje
 from backend.database.models.project import Project, ProjectMember
 from backend.database.session import get_rls_db
 from backend.schemas.health import ErrorResponse
+from backend.schemas.project_dashboard import ProjectSecurityDashboard
 from backend.schemas.projects import (
     ProjectCreate,
     ProjectItem,
@@ -31,6 +32,7 @@ from backend.schemas.projects import (
     ProjectUpdate,
 )
 from backend.services.project import ProjectService
+from backend.services.project_dashboard import ProjectDashboardService
 
 router = APIRouter(
     prefix="/api/projects", tags=["projects"], dependencies=[Depends(get_current_user)]
@@ -156,6 +158,26 @@ async def get_project(
     service = ProjectService(session)
     record = await service.get(project_id)
     return _project_dict(record)
+
+
+@router.get(
+    "/{project_id}/dashboard",
+    summary="Project security dashboard",
+    description="Real aggregation over this project's Finding/ScanRun data - security score, "
+    "open/overdue/waiting-verify counts, latest scan, security trend, top risks, latest "
+    "findings, and assigned work. Any project member (including viewer) may view this - it is "
+    "read-only.",
+    response_model=ProjectSecurityDashboard,
+    responses={**_UNAUTHORIZED, **_NOT_FOUND},
+)
+async def get_project_dashboard(
+    project_id: uuid.UUID,
+    session: AsyncSession = Depends(get_rls_db),
+    app_user: AppUser = Depends(get_app_user),
+    _member: Optional[ProjectMember] = Depends(get_project_member),
+) -> dict:
+    service = ProjectDashboardService(session)
+    return await service.get_security_dashboard(project_id, app_user)
 
 
 @router.patch(
