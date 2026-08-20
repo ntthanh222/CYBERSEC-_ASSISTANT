@@ -10,6 +10,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
 from backend.api.admin import router as admin_router
+from backend.api.admin_lifecycle import router as admin_lifecycle_router
 from backend.api.alerts import router as alerts_router
 from backend.api.attack_graph import router as attack_graph_router
 from backend.api.assets import router as assets_router
@@ -209,6 +210,7 @@ app.include_router(local_auth_router)
 app.include_router(local_admin_router)
 app.include_router(unified_login_router)
 app.include_router(admin_router)
+app.include_router(admin_lifecycle_router)
 app.include_router(assets_router)
 app.include_router(threat_intel_router)
 app.include_router(vulnerabilities_router)

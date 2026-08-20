@@ -82,6 +82,16 @@ class ProjectMemberRepository:
         )
         return int(result or 0)
 
+    async def count_all(self, *, project_id: uuid.UUID) -> int:
+        """Every member regardless of role - the admin projects list's
+        "member count" column (Task 7)."""
+        result = await self._session.scalar(
+            sa.select(sa.func.count())
+            .select_from(ProjectMember)
+            .where(ProjectMember.project_id == project_id)
+        )
+        return int(result or 0)
+
     async def update_role(self, member: ProjectMember, *, project_role: str) -> ProjectMember:
         member.project_role = project_role
         await self._session.flush()

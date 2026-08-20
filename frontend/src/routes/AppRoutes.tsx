@@ -13,6 +13,11 @@ import { OfflineView } from '../features/auth/login/OfflineView';
 import { AdminOverviewView } from '../features/admin/views/AdminOverviewView';
 import { UserManagementView } from '../features/admin/views/UserManagementView';
 import { AdminAuditView } from '../features/admin/views/AdminAuditView';
+// Task 7: Admin Console Upgrade - vuln-lifecycle admin visibility tabs.
+import { AdminWorkspacesView } from '../features/admin/views/AdminWorkspacesView';
+import { AdminProjectsView } from '../features/admin/views/AdminProjectsView';
+import { AdminFindingsView } from '../features/admin/views/AdminFindingsView';
+import { AdminSlaPoliciesView } from '../features/admin/views/AdminSlaPoliciesView';
 
 // Phase 2 View imports
 import { AIAssistantView } from '../features/assistant/views/AIAssistantView';
@@ -224,6 +229,11 @@ export const AppRoutes: React.FC = () => {
       <Route path="/admin/health" element={<AdminRoute><AdminOverviewView /></AdminRoute>} />
       <Route path="/admin/users" element={<AdminRoute><UserManagementView /></AdminRoute>} />
       <Route path="/admin/audit" element={<AdminRoute><AdminAuditView /></AdminRoute>} />
+      {/* Task 7: Admin Console Upgrade - vuln-lifecycle entity visibility. */}
+      <Route path="/admin/workspaces" element={<AdminRoute><AdminWorkspacesView /></AdminRoute>} />
+      <Route path="/admin/projects" element={<AdminRoute><AdminProjectsView /></AdminRoute>} />
+      <Route path="/admin/findings" element={<AdminRoute><AdminFindingsView /></AdminRoute>} />
+      <Route path="/admin/sla-policies" element={<AdminRoute><AdminSlaPoliciesView /></AdminRoute>} />
       <Route path="/admin/crawler" element={<AdminRoute><AdminOverviewView /></AdminRoute>} />
       <Route path="/admin/rag" element={<AdminRoute><AdminOverviewView /></AdminRoute>} />
       <Route path="/admin/settings" element={<AdminRoute><AdminOverviewView /></AdminRoute>} />

@@ -205,6 +205,42 @@ export const AdminOverviewView: React.FC = () => {
               </div>
             </section>
           </div>
+
+          {/* Task 7: vuln-lifecycle admin overview additions. */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <button onClick={() => navigate('/admin/workspaces')} className="text-left bg-surface-container border border-surface-container-highest rounded-lg p-5 hover:border-primary/30">
+              <span className="text-[10px] font-mono tracking-widest text-text-muted uppercase font-bold">Active workspaces</span>
+              <h3 className="font-headline font-black text-3xl mt-1 text-text-primary">{summary.active_workspaces}</h3>
+            </button>
+            <button onClick={() => navigate('/admin/projects')} className="text-left bg-surface-container border border-surface-container-highest rounded-lg p-5 hover:border-primary/30">
+              <span className="text-[10px] font-mono tracking-widest text-text-muted uppercase font-bold">Active projects</span>
+              <h3 className="font-headline font-black text-3xl mt-1 text-text-primary">{summary.active_projects}</h3>
+            </button>
+            <button onClick={() => navigate('/admin/findings')} className="text-left bg-surface-container border border-surface-container-highest rounded-lg p-5 hover:border-primary/30">
+              <span className="text-[10px] font-mono tracking-widest text-text-muted uppercase font-bold">Open findings</span>
+              <h3 className="font-headline font-black text-3xl mt-1 text-text-primary">{summary.open_findings}</h3>
+              <div className="mt-2 text-[10px] font-mono text-text-muted uppercase">{summary.critical_findings} critical · {summary.high_findings} high</div>
+            </button>
+            <button onClick={() => navigate('/admin/findings')} className="text-left bg-surface-container border border-surface-container-highest rounded-lg p-5 hover:border-primary/30">
+              <span className="text-[10px] font-mono tracking-widest text-text-muted uppercase font-bold">Overdue findings</span>
+              <h3 className="font-headline font-black text-3xl mt-1 text-critical">{summary.overdue_findings}</h3>
+              <div className="mt-2 text-[10px] font-mono text-text-muted uppercase">{summary.waiting_verify_findings} waiting verify · {summary.fixed_this_week_findings} fixed this week</div>
+            </button>
+          </div>
+
+          <section className="bg-surface-container border border-surface-container-highest rounded-lg p-5">
+            <h3 className="font-headline font-bold text-sm text-text-primary">Project health</h3>
+            <div className="mt-4 grid grid-cols-3 gap-3 text-xs">
+              {summary.project_health.map((bucket) => (
+                <div key={bucket.bucket} className="border border-surface-container-highest rounded-lg p-4 text-center">
+                  <div className={`font-headline font-black text-2xl ${
+                    bucket.bucket === 'healthy' ? 'text-primary' : bucket.bucket === 'warning' ? 'text-warning' : 'text-critical'
+                  }`}>{bucket.count}</div>
+                  <div className="text-[10px] uppercase font-mono text-text-muted">{bucket.bucket}</div>
+                </div>
+              ))}
+            </div>
+          </section>
         </>
       )}
 

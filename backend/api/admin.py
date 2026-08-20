@@ -52,6 +52,12 @@ _UNAUTHORIZED = {401: {"model": ErrorResponse, "description": "Missing or invali
 async def summary(session: AsyncSession = Depends(get_db)) -> AdminSummaryResponse:
     from backend.config.settings import get_settings
     from backend.database.models.rbac import ADMIN_TIER_ROLES, UserRole
+    from backend.database.models.project import Project
+    from backend.database.models.workspace import Workspace
+    from backend.repositories.findings import FindingRepository
+    from backend.repositories.project import ProjectRepository
+    from backend.schemas.rbac import AdminProjectHealthItem
+    from backend.services.project_dashboard import _score_from_counts
 
     settings = get_settings()
 
@@ -116,6 +122,56 @@ async def summary(session: AsyncSession = Depends(get_db)) -> AdminSummaryRespon
     redis_check = await check_redis(settings.redis_url)
     system_status = aggregate_status({"database": db_check, "redis": redis_check})
 
+    # -- Task 7: vuln-lifecycle admin overview additions ------------------
+    # Every field below is a real aggregate query (or a pure function of
+    # one), never a mocked/placeholder number - same "no fake data"
+    # discipline as the rest of this endpoint.
+
+    # Workspaces have no archived/active concept at all (Workspace has no
+    # `status` column - see backend/database/models/workspace.py); every
+    # workspace that exists is therefore counted as "active" here.
+    active_workspaces = int(
+        await session.scalar(sa.select(sa.func.count()).select_from(Workspace)) or 0
+    )
+    active_projects = int(
+        await session.scalar(
+            sa.select(sa.func.count()).select_from(Project).where(Project.status == "active")
+        )
+        or 0
+    )
+
+    findings_repo = FindingRepository(session)
+    open_by_severity = await findings_repo.count_open_by_severity()
+    open_findings = sum(open_by_severity.values())
+    overdue_findings = await findings_repo.count_overdue()
+    waiting_verify_findings = await findings_repo.count_by_status(status="fixed")
+    fixed_since = datetime.now(timezone.utc) - timedelta(days=7)
+    fixed_this_week_findings = await findings_repo.count_transitions_to_status_since(
+        to_status="closed", since=fixed_since
+    )
+
+    # Project Health: bucket every *active* project by its Task 5 security
+    # score - a modest N+1 (one aggregate query per active project), judged
+    # acceptable here since this is an admin overview refreshed
+    # occasionally, not a hot path (see the Task 7 brief).
+    projects_repo = ProjectRepository(session)
+    health_buckets = {"healthy": 0, "warning": 0, "critical": 0}
+    for project in await projects_repo.list_active():
+        project_open_by_severity = await findings_repo.count_open_by_severity(
+            project_id=project.id
+        )
+        score = _score_from_counts(project_open_by_severity)
+        if score >= 80:
+            health_buckets["healthy"] += 1
+        elif score >= 50:
+            health_buckets["warning"] += 1
+        else:
+            health_buckets["critical"] += 1
+    project_health = [
+        AdminProjectHealthItem(bucket=bucket, count=count)
+        for bucket, count in health_buckets.items()
+    ]
+
     total_users = int(total_users or 0)
     admins = int(admins or 0)
     active = int(active or 0)
@@ -142,6 +198,15 @@ async def summary(session: AsyncSession = Depends(get_db)) -> AdminSummaryRespon
         system_status=system_status,
         audit_events=int(audit_events or 0),
         recent_admin_actions=int(recent_admin_actions or 0),
+        active_workspaces=active_workspaces,
+        active_projects=active_projects,
+        open_findings=open_findings,
+        critical_findings=open_by_severity.get("critical", 0),
+        high_findings=open_by_severity.get("high", 0),
+        overdue_findings=overdue_findings,
+        waiting_verify_findings=waiting_verify_findings,
+        fixed_this_week_findings=fixed_this_week_findings,
+        project_health=project_health,
     )
 
 

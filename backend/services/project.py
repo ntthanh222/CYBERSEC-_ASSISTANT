@@ -101,6 +101,9 @@ class ProjectService:
         include_archived: bool,
         page: int,
         page_size: int,
+        environment: Optional[str] = None,
+        criticality: Optional[str] = None,
+        status: Optional[str] = None,
     ):
         return await self._projects.list_for_user(
             user_id=user_id,
@@ -109,6 +112,9 @@ class ProjectService:
             include_archived=include_archived,
             page=page,
             page_size=page_size,
+            environment=environment,
+            criticality=criticality,
+            status=status,
         )
 
     async def update(

@@ -51,6 +51,16 @@ class WorkspaceMemberRepository:
         )
         return int(result or 0)
 
+    async def count_all(self, *, workspace_id: uuid.UUID) -> int:
+        """Every member regardless of role - the admin workspaces list's
+        "member count" column (Task 7)."""
+        result = await self._session.scalar(
+            sa.select(sa.func.count())
+            .select_from(WorkspaceMember)
+            .where(WorkspaceMember.workspace_id == workspace_id)
+        )
+        return int(result or 0)
+
     async def update_role(self, member: WorkspaceMember, *, workspace_role: str) -> WorkspaceMember:
         member.workspace_role = workspace_role
         await self._session.flush()

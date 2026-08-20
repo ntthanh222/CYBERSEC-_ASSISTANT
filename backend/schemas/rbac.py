@@ -83,12 +83,39 @@ class AdminContentCounts(BaseModel):
     scans: int
 
 
+#: Simple security-score bucketing for the admin summary's "Project Health"
+#: breakdown (Task 7) - reuses ProjectDashboardService's existing 0-100
+#: score formula (Task 5), just grouped into three bands instead of shown
+#: per-project. Thresholds are a new, documented judgement call for this
+#: task (no prior convention exists): critical < 50, warning 50-79,
+#: healthy >= 80 - the same "a single critical finding costs a lot" spirit
+#: as the score formula itself (score 50 already implies roughly 3+ open
+#: criticals, or an equivalent mix).
+ProjectHealthBucket = Literal["healthy", "warning", "critical"]
+
+
+class AdminProjectHealthItem(BaseModel):
+    bucket: ProjectHealthBucket
+    count: int
+
+
 class AdminSummaryResponse(BaseModel):
     users: AdminUserCounts
     content: AdminContentCounts
     system_status: str
     audit_events: int = 0
     recent_admin_actions: int = 0
+    #: Task 7: vuln-lifecycle admin overview additions. Every count below is
+    #: a real aggregate query - see backend.api.admin.summary.
+    active_workspaces: int = 0
+    active_projects: int = 0
+    open_findings: int = 0
+    critical_findings: int = 0
+    high_findings: int = 0
+    overdue_findings: int = 0
+    waiting_verify_findings: int = 0
+    fixed_this_week_findings: int = 0
+    project_health: list[AdminProjectHealthItem] = Field(default_factory=list)
 
 
 class AdminAuditLogItem(BaseModel):

@@ -273,45 +273,64 @@ class FindingRepository:
     # computed from anything but these queries (see
     # backend.services.project_dashboard.ProjectDashboardService).
 
-    async def count_open_by_severity(self, *, project_id: uuid.UUID) -> dict[str, int]:
+    async def count_open_by_severity(
+        self, *, project_id: Optional[uuid.UUID] = None
+    ) -> dict[str, int]:
         """Open-finding counts (status not in ``TERMINAL_STATUSES``, mirroring
         ``sla.TERMINAL_STATUSES``/the dashboard's "Open Findings" definition)
         grouped by severity in one query, rather than one query per severity.
-        Always returns all four severities (0 for any with no open findings)."""
+        Always returns all four severities (0 for any with no open findings).
+
+        ``project_id=None`` means "every project" (Task 7's admin summary
+        aggregates across the whole app, not one project) - the caller is
+        responsible for authorization; this repository has none of its own."""
+        filters: list[Any] = [Finding.status.notin_(TERMINAL_STATUSES)]
+        if project_id is not None:
+            filters.append(Finding.project_id == project_id)
         rows = await self._session.execute(
-            sa.select(Finding.severity, sa.func.count())
-            .where(
-                Finding.project_id == project_id,
-                Finding.status.notin_(TERMINAL_STATUSES),
-            )
-            .group_by(Finding.severity)
+            sa.select(Finding.severity, sa.func.count()).where(*filters).group_by(Finding.severity)
         )
         counts = {severity: 0 for severity in ("low", "medium", "high", "critical")}
         for severity, count in rows.all():
             counts[severity] = int(count)
         return counts
 
-    async def count_by_status(self, *, project_id: uuid.UUID, status: str) -> int:
+    async def count_open(self, *, project_id: Optional[uuid.UUID] = None) -> int:
+        """Total open-finding count (status not in ``TERMINAL_STATUSES``) -
+        a single-query convenience over ``count_open_by_severity`` for
+        callers (e.g. the admin projects list) that only need the total, not
+        the per-severity breakdown. ``project_id=None`` means every project."""
+        filters: list[Any] = [Finding.status.notin_(TERMINAL_STATUSES)]
+        if project_id is not None:
+            filters.append(Finding.project_id == project_id)
         total = await self._session.scalar(
-            sa.select(sa.func.count())
-            .select_from(Finding)
-            .where(Finding.project_id == project_id, Finding.status == status)
+            sa.select(sa.func.count()).select_from(Finding).where(*filters)
         )
         return int(total or 0)
 
-    async def count_overdue(self, *, project_id: uuid.UUID) -> int:
+    async def count_by_status(self, *, project_id: Optional[uuid.UUID] = None, status: str) -> int:
+        filters: list[Any] = [Finding.status == status]
+        if project_id is not None:
+            filters.append(Finding.project_id == project_id)
+        total = await self._session.scalar(
+            sa.select(sa.func.count()).select_from(Finding).where(*filters)
+        )
+        return int(total or 0)
+
+    async def count_overdue(self, *, project_id: Optional[uuid.UUID] = None) -> int:
         """Mirrors the exact SQL overdue predicate ``list_by_assignee`` uses
         (Task 4 review fix) and ``sla.is_overdue``'s definition: a non-null
-        ``deadline`` in the past, on a Finding whose status isn't terminal."""
+        ``deadline`` in the past, on a Finding whose status isn't terminal.
+        ``project_id=None`` means every project (Task 7 admin summary)."""
+        filters: list[Any] = [
+            Finding.deadline.is_not(None),
+            Finding.status.notin_(TERMINAL_STATUSES),
+            Finding.deadline < datetime.now(timezone.utc),
+        ]
+        if project_id is not None:
+            filters.append(Finding.project_id == project_id)
         total = await self._session.scalar(
-            sa.select(sa.func.count())
-            .select_from(Finding)
-            .where(
-                Finding.project_id == project_id,
-                Finding.deadline.is_not(None),
-                Finding.status.notin_(TERMINAL_STATUSES),
-                Finding.deadline < datetime.now(timezone.utc),
-            )
+            sa.select(sa.func.count()).select_from(Finding).where(*filters)
         )
         return int(total or 0)
 
@@ -383,20 +402,85 @@ class FindingRepository:
         return list(rows)
 
     async def count_transitions_to_status_since(
-        self, *, project_id: uuid.UUID, to_status: str, since: datetime
+        self, *, project_id: Optional[uuid.UUID] = None, to_status: str, since: datetime
     ) -> int:
-        """Count of ``FindingTransition`` rows for this project's findings
-        with ``to_status`` reached at/after ``since`` - drives the dashboard's
-        "Fixed This Week" metric (see ``ProjectDashboardService`` for which
-        ``to_status`` is used and why)."""
+        """Count of ``FindingTransition`` rows with ``to_status`` reached
+        at/after ``since`` - drives the dashboard's "Fixed This Week" metric
+        (see ``ProjectDashboardService`` for which ``to_status`` is used and
+        why). ``project_id=None`` scopes across every project (Task 7 admin
+        summary) instead of one."""
+        filters: list[Any] = [
+            FindingTransition.to_status == to_status,
+            FindingTransition.created_at >= since,
+        ]
+        if project_id is not None:
+            filters.append(Finding.project_id == project_id)
         total = await self._session.scalar(
             sa.select(sa.func.count())
             .select_from(FindingTransition)
             .join(Finding, Finding.id == FindingTransition.finding_id)
-            .where(
-                Finding.project_id == project_id,
-                FindingTransition.to_status == to_status,
-                FindingTransition.created_at >= since,
-            )
+            .where(*filters)
         )
         return int(total or 0)
+
+    # -- Task 7: admin cross-project findings view -------------------------
+
+    async def list_for_admin(
+        self,
+        *,
+        project_id: Optional[uuid.UUID],
+        status: Optional[str],
+        severity: Optional[str],
+        assignee_user_id: Optional[uuid.UUID],
+        overdue: Optional[bool],
+        fixed_since: Optional[datetime],
+        page: int,
+        page_size: int,
+    ) -> tuple[Sequence[tuple[Finding, str]], int]:
+        """Findings across every project (or one, if ``project_id`` is
+        given), joined with their parent ``Project.name`` - the admin
+        counterpart of ``list_by_assignee`` (Task 4), same SQL-level
+        filtering/pagination/overdue-predicate approach, just scoped by
+        project rather than by assignee. Admin-only: no membership filter,
+        the caller (``backend.api.admin_lifecycle``, gated by
+        ``require_admin``) is responsible for authorization.
+
+        ``fixed_since`` filters on ``Finding.closed_at`` (the stored column
+        set the moment a finding's status becomes ``closed`` - see
+        ``FindingService.transition``) - the same status Task 5's dashboard
+        "Fixed This Week" metric counts, so a caller combining
+        ``status="closed"`` with ``fixed_since=<7 days ago>`` sees exactly
+        the findings that metric counts, not just filters on it.
+        """
+        filters: list[Any] = []
+        if project_id is not None:
+            filters.append(Finding.project_id == project_id)
+        if status is not None:
+            filters.append(Finding.status == status)
+        if severity is not None:
+            filters.append(Finding.severity == severity)
+        if assignee_user_id is not None:
+            filters.append(Finding.assignee_user_id == assignee_user_id)
+        if fixed_since is not None:
+            filters.append(Finding.closed_at.is_not(None))
+            filters.append(Finding.closed_at >= fixed_since)
+        if overdue is not None:
+            is_overdue_predicate = sa.and_(
+                Finding.deadline.is_not(None),
+                Finding.status.notin_(TERMINAL_STATUSES),
+                Finding.deadline < datetime.now(timezone.utc),
+            )
+            filters.append(is_overdue_predicate if overdue else sa.not_(is_overdue_predicate))
+
+        total = await self._session.scalar(
+            sa.select(sa.func.count()).select_from(Finding).where(*filters)
+        )
+        rows = await self._session.execute(
+            sa.select(Finding, Project.name)
+            .join(Project, Project.id == Finding.project_id)
+            .where(*filters)
+            .order_by(Finding.created_at.desc(), Finding.id)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return [(row[0], row[1]) for row in rows.all()], int(total or 0)

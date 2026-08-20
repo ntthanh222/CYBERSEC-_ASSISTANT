@@ -156,3 +156,30 @@ async def test_summary_reflects_real_content_counts(api_client, db_sessionmaker)
     assert body["users"]["total"] >= 1
     assert body["users"]["admins"] >= 1
     assert body["content"]["conversations"] >= 1
+
+
+async def test_summary_lifecycle_fields_are_zero_with_no_seeded_workspaces(
+    api_client, db_sessionmaker
+):
+    """Task 7: the summary's vuln-lifecycle additions (Workspaces/Projects/
+    Findings/Project Health) - exact values against a state with none of
+    those entities seeded, i.e. every one of them must be provably 0/empty,
+    never a placeholder default. The full exact-nonzero-value coverage of
+    every field lives in test_admin_lifecycle.py, which seeds real
+    workspaces/projects/findings."""
+    await _admin_client(api_client, db_sessionmaker)
+
+    body = api_client.get("/api/admin/summary").json()
+    assert body["active_workspaces"] == 0
+    assert body["active_projects"] == 0
+    assert body["open_findings"] == 0
+    assert body["critical_findings"] == 0
+    assert body["high_findings"] == 0
+    assert body["overdue_findings"] == 0
+    assert body["waiting_verify_findings"] == 0
+    assert body["fixed_this_week_findings"] == 0
+    assert body["project_health"] == [
+        {"bucket": "healthy", "count": 0},
+        {"bucket": "warning", "count": 0},
+        {"bucket": "critical", "count": 0},
+    ]

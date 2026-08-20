@@ -22,12 +22,29 @@ export interface AdminContentCounts {
   scans: number;
 }
 
+export type AdminProjectHealthBucket = 'healthy' | 'warning' | 'critical';
+
+export interface AdminProjectHealthItem {
+  bucket: AdminProjectHealthBucket;
+  count: number;
+}
+
 export interface AdminSummary {
   users: AdminUserCounts;
   content: AdminContentCounts;
   system_status: string;
   audit_events: number;
   recent_admin_actions: number;
+  // Task 7: vuln-lifecycle admin overview additions.
+  active_workspaces: number;
+  active_projects: number;
+  open_findings: number;
+  critical_findings: number;
+  high_findings: number;
+  overdue_findings: number;
+  waiting_verify_findings: number;
+  fixed_this_week_findings: number;
+  project_health: AdminProjectHealthItem[];
 }
 
 export interface AdminUserItem {

@@ -1,11 +1,27 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Bot, FileText, HeartPulse, RadioTower, Settings, ShieldCheck, Users } from 'lucide-react';
+import {
+  Bot,
+  FileText,
+  FolderKanban,
+  HeartPulse,
+  RadioTower,
+  Settings,
+  ShieldAlert,
+  ShieldCheck,
+  Timer,
+  Users,
+} from 'lucide-react';
 
 const tabs = [
   { label: 'Overview', path: '/admin/overview', match: '/admin/overview', icon: ShieldCheck },
   { label: 'Users & Roles', path: '/admin/users', match: '/admin/users', icon: Users },
   { label: 'Audit Logs', path: '/admin/audit', match: '/admin/audit', icon: FileText },
+  // Task 7: vuln-lifecycle admin visibility tabs.
+  { label: 'Workspaces', path: '/admin/workspaces', match: '/admin/workspaces', icon: FolderKanban },
+  { label: 'Projects', path: '/admin/projects', match: '/admin/projects', icon: FolderKanban },
+  { label: 'Findings', path: '/admin/findings', match: '/admin/findings', icon: ShieldAlert },
+  { label: 'SLA / Policies', path: '/admin/sla-policies', match: '/admin/sla-policies', icon: Timer },
   { label: 'System Health', path: '/admin/health', match: '/admin/health', icon: HeartPulse },
   { label: 'AI & Knowledge', path: '/admin/rag', match: '/admin/rag', icon: Bot },
   { label: 'Crawler', path: '/admin/crawler', match: '/admin/crawler', icon: RadioTower },
