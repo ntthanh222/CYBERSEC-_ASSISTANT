@@ -18,8 +18,6 @@ scenarios each:
 """
 import uuid
 
-import pytest
-
 from backend.core.authorization import AppUser
 from backend.database.models.cve_assessment import CveAssessment
 from backend.database.models.finding import Finding

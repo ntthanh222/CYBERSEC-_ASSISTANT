@@ -11,7 +11,7 @@ from backend.providers.enrichment.base import EpssScore
 from backend.services import project_cve as project_cve_module
 from backend.services.cve import CveLookupService
 
-from .conftest import TEST_USER_A, TEST_USER_B
+from .conftest import TEST_USER_B
 
 
 class FakeEpssProvider:

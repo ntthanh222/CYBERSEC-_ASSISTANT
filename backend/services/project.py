@@ -6,6 +6,8 @@ supplied in the request body (``POST /api/projects``), not the URL path, so
 there is no ``workspace_id`` path parameter for
 ``backend.core.workspace_authorization.require_workspace_role`` to bind to.
 """
+from __future__ import annotations
+
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional

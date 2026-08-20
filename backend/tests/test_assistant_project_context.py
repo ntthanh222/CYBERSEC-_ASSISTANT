@@ -354,7 +354,7 @@ async def test_chat_route_forbidden_message_reachable_with_real_rls_session_wiri
     from backend.repositories.project import ProjectRepository
     from backend.services.rag.tool_router import AppDataToolRouter
 
-    async def faithful_get_rls_db(session: AsyncSession = Depends(get_db)):
+    async def faithful_get_rls_db(session: AsyncSession = Depends(get_db)):  # noqa: B008
         # Same dependency SHAPE as the real get_rls_db (its own nested
         # Depends(get_db)) - no Postgres-only SET LOCAL/set_config calls,
         # which SQLite cannot execute and which are not what this test is

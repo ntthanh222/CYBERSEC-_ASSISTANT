@@ -4,8 +4,6 @@ anywhere in the production code path, per the plan)."""
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from backend.database.models.finding import Finding
 from backend.database.models.scan import ScanRun
 from backend.services.project_dashboard import _score_from_counts

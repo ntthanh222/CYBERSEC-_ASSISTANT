@@ -132,7 +132,7 @@ def test_clean_database_upgrades_to_0027_and_seeds_defaults(migrated_db):
     )
     # Two global-default rows for the same severity must be rejected by the
     # partial unique index - see sla_policy.py's docstring.
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         engine = create_engine(migrated_db)
         try:
             with engine.begin() as conn:

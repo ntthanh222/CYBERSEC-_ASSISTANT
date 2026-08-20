@@ -109,7 +109,7 @@ def test_clean_database_upgrades_to_0028(migrated_db):
     # A bad priority label must be rejected by the CHECK constraint (no FK
     # setup needed - the CHECK fires before the FK constraint is even
     # evaluated for an obviously-bogus row).
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         engine = create_engine(migrated_db)
         try:
             with engine.begin() as conn:
