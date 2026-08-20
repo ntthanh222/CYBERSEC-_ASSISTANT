@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.deps import PageParams, page_params
 from backend.core.actor import get_current_actor
 from backend.core.auth import AuthenticatedUser, get_current_user
+from backend.core.authorization import AppUser, get_app_user
 from backend.core.rate_limit import rate_limit
 from backend.database.models.conversation import Conversation, Message
 from backend.database.session import get_rls_db
@@ -99,6 +100,7 @@ async def chat(
     payload: ChatRequest,
     session: AsyncSession = Depends(get_rls_db),
     user: AuthenticatedUser = Depends(get_current_user),
+    app_user: AppUser = Depends(get_app_user),
     actor: str = Depends(get_current_actor),
 ) -> dict:
     service = AssistantService(session)
@@ -108,6 +110,8 @@ async def chat(
         mode=payload.mode,
         user_id=user.id,
         actor=actor,
+        project_id=payload.project_id,
+        caller=app_user,
     )
     meta = message.meta or {}
     return {

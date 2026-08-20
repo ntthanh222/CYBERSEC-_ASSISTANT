@@ -423,6 +423,53 @@ class FindingRepository:
         )
         return int(total or 0)
 
+    # -- Task 8: AI Project Security Copilot tool-router support ----------
+    # Both methods below are plain filtered selects over already-computed
+    # Finding/status data - neither reimplements Task 3's fingerprint/diff
+    # logic or Task 5's dashboard aggregation, per the Task 8 brief.
+
+    async def list_by_cve_or_rule(
+        self,
+        *,
+        project_id: uuid.UUID,
+        cve_id: Optional[str] = None,
+        rule_id: Optional[str] = None,
+    ) -> Sequence[Finding]:
+        """Findings in one project matching a given CVE id or rule_id, most
+        recent first - the AI copilot's rescan-history handler (Task 8)
+        reads this to answer "was this fixed?" / "did the previous scan
+        have this?" purely from already-stored Finding state."""
+        if not cve_id and not rule_id:
+            return []
+        filters: list[Any] = [Finding.project_id == project_id]
+        if cve_id:
+            filters.append(Finding.cve_id == cve_id)
+        else:
+            filters.append(Finding.rule_id == rule_id)
+        rows = await self._session.scalars(
+            sa.select(Finding).where(*filters).order_by(Finding.created_at.desc())
+        )
+        return list(rows)
+
+    async def list_assigned_open(
+        self, *, project_id: uuid.UUID, limit: int = 20
+    ) -> Sequence[Finding]:
+        """Open findings in a project that currently have an assignee,
+        severity-first - the AI copilot's assignment handler (Task 8) needs
+        actual rows, not just the per-assignee counts
+        ``count_assigned_open_by_assignee`` returns."""
+        rows = await self._session.scalars(
+            sa.select(Finding)
+            .where(
+                Finding.project_id == project_id,
+                Finding.assignee_user_id.is_not(None),
+                Finding.status.notin_(TERMINAL_STATUSES),
+            )
+            .order_by(self._SEVERITY_RANK, Finding.created_at.desc())
+            .limit(limit)
+        )
+        return list(rows)
+
     # -- Task 7: admin cross-project findings view -------------------------
 
     async def list_for_admin(

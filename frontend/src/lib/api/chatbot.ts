@@ -52,17 +52,26 @@ export interface ChatResponse {
 }
 
 /** Never sends a user id - the backend derives ownership solely from the
- * verified Bearer token (see backend/core/auth.py:get_current_user). */
+ * verified Bearer token (see backend/core/auth.py:get_current_user).
+ *
+ * `projectId` is optional and only scopes the question to one project (see
+ * backend/services/rag/tool_router.py's project-context handlers) - the
+ * backend independently re-checks that the caller is actually a member of
+ * that project (or a global admin) before answering with any project data,
+ * so this is a UX convenience, never a trust boundary by itself. Omit it
+ * for a general question unrelated to any specific project. */
 export function sendChatMessage(params: {
   message: string;
   conversationId?: string;
   mode: 'fast' | 'deep';
+  projectId?: string;
   signal?: AbortSignal;
 }): Promise<ChatResponse> {
   return apiPost<ChatResponse>('/api/chatbot/chat', {
     message: params.message,
     conversation_id: params.conversationId ?? null,
     mode: params.mode,
+    project_id: params.projectId ?? null,
   }, { signal: params.signal });
 }
 

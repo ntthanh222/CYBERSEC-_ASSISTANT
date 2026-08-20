@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config.settings import get_settings
 from backend.core.audit import log_audit_event
+from backend.core.authorization import AppUser
 from backend.core.exceptions import (
     AppError,
     InvalidRequestError,
@@ -91,7 +92,12 @@ SYSTEM_PROMPT: Final = (
     "identifiers such as CVE numbers, CVSS vectors/scores, MITRE ATT&CK "
     "technique IDs, and product/vendor names exactly as given - never "
     "mistranslate or alter them. Preserve [N] citation markers exactly as "
-    "instructed below. Never invent facts, CVE numbers, or citations."
+    "instructed below. Never invent facts, CVE numbers, or citations.\n\n"
+    "- Structured Project/Finding/Scan/CVE context blocks provided by the "
+    "platform's own tool router (not retrieved documents) are deterministic, "
+    "pre-computed facts from the live database - treat them as ground truth "
+    "to explain in plain language, never second-guess, recompute, or "
+    "contradict the values they contain."
 )
 
 #: Intents that are always answered locally, whatever the requested mode.
@@ -208,6 +214,8 @@ class AssistantService:
         mode: str,
         user_id: uuid.UUID,
         actor: Optional[str],
+        project_id: Optional[uuid.UUID] = None,
+        caller: Optional[AppUser] = None,
     ) -> tuple[Conversation, Message]:
         content = validate_message(message)
         normalized = normalize_query(content)
@@ -290,6 +298,8 @@ class AssistantService:
             entities,
             user_id=user_id,
             intent=intent.value,
+            project_id=project_id,
+            caller=caller,
         )
         documents: Sequence[RagDocument] = ()
         evidence_result = None

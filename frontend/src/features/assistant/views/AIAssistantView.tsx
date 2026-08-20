@@ -15,6 +15,7 @@ import { ConversationSidebar } from '../components/ConversationSidebar';
 import { ConversationArea } from '../components/ConversationArea';
 import { Composer } from '../components/Composer';
 import { KnowledgeBaseView } from '../../knowledge-base/views/KnowledgeBaseView';
+import { ProjectProvider, useSelectedProject, ProjectPicker } from '../../projects/ProjectContext';
 import { Sparkles, AlertTriangle, PanelLeft, BookOpen, MessageSquare } from 'lucide-react';
 
 const SIDEBAR_OPEN_STORAGE_KEY = 'cybersec_ai_sidebar_open';
@@ -63,7 +64,14 @@ function toChatSession(conversation: Conversation, messages: AIMessage[] = []): 
   };
 }
 
-export const AIAssistantView: React.FC = () => {
+export const AIAssistantView: React.FC = () => (
+  <ProjectProvider>
+    <AIAssistantViewInner />
+  </ProjectProvider>
+);
+
+const AIAssistantViewInner: React.FC = () => {
+  const { selectedProject } = useSelectedProject();
   const location = useLocation();
   const knowledgeTab = location.pathname.startsWith('/ai/knowledge');
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -174,6 +182,7 @@ export const AIAssistantView: React.FC = () => {
           message: text,
           conversationId: conversationIdBeforeSend,
           mode,
+          projectId: selectedProject?.id,
           signal: controller.signal,
         });
 
@@ -238,7 +247,7 @@ export const AIAssistantView: React.FC = () => {
         }
       }
     },
-    [activeSession],
+    [activeSession, selectedProject],
   );
 
   const handleStopGenerating = () => {
@@ -270,6 +279,12 @@ export const AIAssistantView: React.FC = () => {
               <BookOpen className="h-3.5 w-3.5" /> Kho kiến thức
             </Link>
           </div>
+          {!knowledgeTab && (
+            <div className="flex items-center gap-1.5 border-l border-surface-container-highest pl-3">
+              <span className="text-[10px] text-text-muted font-mono">Dự án:</span>
+              <ProjectPicker />
+            </div>
+          )}
         </div>
         {errorMsg && (
           <div className="flex items-center gap-1.5 text-critical text-[10px] font-mono">

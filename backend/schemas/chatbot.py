@@ -45,6 +45,19 @@ class ChatRequest(BaseModel):
         ),
         examples=["deep"],
     )
+    project_id: Optional[UUID] = Field(
+        default=None,
+        description=(
+            "Scope this question to one project (e.g. from a project selector "
+            "in the assistant UI). When set, the assistant can answer project "
+            "status/priority/assignment/overdue/CVE/policy questions using live "
+            "project data - but only if the caller is a member of this project "
+            "(or a global admin); otherwise the response is an explicit "
+            "access-denied message, never a silent fallback. Omit for a "
+            "general question unrelated to any specific project."
+        ),
+        examples=["3f1d2c9a-6b4e-4d7a-9c1f-2b8e5a0d4c31"],
+    )
 
 
 class CitationResponse(BaseModel):

@@ -14,15 +14,26 @@ from typing import Any, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.authorization import AppUser
 from backend.core.exceptions import AppError, BlockedTargetError
 from backend.repositories.alerts import AlertRepository
 from backend.repositories.assets import AssetRepository
+from backend.repositories.cve_assessments import CveAssessmentRepository
+from backend.repositories.findings import FindingRepository
 from backend.repositories.incidents import IncidentRepository
 from backend.repositories.reports import ReportRepository
+from backend.repositories.sla_policies import SlaPolicyRepository
 from backend.repositories.vulnerabilities import VulnerabilityRepository
+from backend.services import sla as sla_service
 from backend.services.cve import CveLookupService
 from backend.services.health import check_database
+from backend.services.project_dashboard import ProjectDashboardService
 from backend.services.rag.entity_extractor import ExtractedEntities
+from backend.services.rag.project_context import (
+    ProjectAccessResult,
+    DENIAL_FORBIDDEN,
+    resolve_project_access,
+)
 from backend.services.security_news import SecurityNewsService
 from backend.services.url_scanner import blocked_summary, scan_url, summarize
 
@@ -76,6 +87,9 @@ class AppDataToolRouter:
         self._alert_repo = AlertRepository(session)
         self._vuln_repo = VulnerabilityRepository(session)
         self._report_repo = ReportRepository(session)
+        self._finding_repo = FindingRepository(session)
+        self._sla_policy_repo = SlaPolicyRepository(session)
+        self._cve_assessment_repo = CveAssessmentRepository(session)
 
     async def try_route(
         self,
@@ -84,13 +98,34 @@ class AppDataToolRouter:
         *,
         user_id: uuid.UUID,
         intent: str | None = None,
+        project_id: uuid.UUID | None = None,
+        caller: AppUser | None = None,
     ) -> ToolRouteResult:
         text = (query or "").strip().lower()
 
         # An explicit "theo tài liệu vừa upload" reference must force RAG
-        # retrieval - never answer from an app-data tool or stale entities.
+        # retrieval - never answer from an app-data tool or stale entities,
+        # and never from a project-context tool either (checked first, even
+        # ahead of the project-scoped routes below, so selecting a project
+        # can never hijack an explicit document follow-up).
         if intent == "knowledge_rag":
             return ToolRouteResult(handled=False)
+
+        # Project-scoped routes (Task 8: AI Project Security Copilot) - only
+        # engaged when the caller has actually selected a project (an
+        # explicit project_id parameter threaded from the chat request, see
+        # AssistantService.chat). No project selected means these new
+        # handlers never match, and behavior is identical to before this
+        # task existed. Checked before every other branch below so a
+        # project-scoped question is never accidentally answered by the
+        # flat/global handlers (e.g. a project-selected CVE question must
+        # get project-aware priority context, not the generic CVE lookup).
+        if project_id is not None and caller is not None:
+            project_result = await self._route_project_scoped(
+                text, entities, project_id=project_id, caller=caller
+            )
+            if project_result is not None:
+                return project_result
 
         # A compromise claim ("website bị tấn công") always routes to
         # incident-response guidance, even if the message also contains a
@@ -330,6 +365,515 @@ class AppDataToolRouter:
             )
 
         return ToolRouteResult(handled=False)
+
+    # -- Task 8: AI Project Security Copilot -------------------------------
+    # Every handler below touches Project/Finding/ScanRun/CveAssessment
+    # data scoped to one project_id. Each one calls
+    # ``resolve_project_access`` as its VERY FIRST action and returns
+    # immediately on a denial - this is the single non-negotiable rule for
+    # this section of the router (see the Task 8 brief). No handler here
+    # queries Finding/ScanRun/CveAssessment data before that check passes.
+
+    #: Keyword groups used by ``_route_project_scoped`` to pick which new
+    #: project-context handler answers a message, bilingual (Vietnamese +
+    #: English) matching the existing router's keyword-match style. Checked
+    #: in this exact order - see ``_route_project_scoped`` for why the order
+    #: matters (e.g. a rescan-history question about a specific CVE must win
+    #: over the generic "any CVE mention" -> cve_priority fallback).
+    _PROJECT_RESCAN_HISTORY_TERMS: tuple[str, ...] = (
+        "da sua chua", "đã sửa chưa", "da fix chua", "đã fix chưa",
+        "lan quet truoc", "lần quét trước", "scan truoc", "quét trước",
+        "previous scan", "was this fixed", "already fixed", "con khong",
+        "còn không", "con ton tai khong", "còn tồn tại không",
+        "did the previous scan",
+    )
+    #: Deliberately does NOT include the bare word "sla" - "SLA" alone is
+    #: ambiguous between "what's overdue against the SLA?" and "what does
+    #: the SLA policy say?"; the more specific policy-question phrasing
+    #: ("sla policy", "chính sách") wins that ambiguity via
+    #: ``_PROJECT_POLICY_TERMS`` instead (checked after this list).
+    _PROJECT_OVERDUE_TERMS: tuple[str, ...] = (
+        "qua han", "quá hạn", "tre han", "trễ hạn", "overdue",
+        "het han", "hết hạn",
+    )
+    _PROJECT_FINDINGS_PRIORITY_TERMS: tuple[str, ...] = (
+        "nen sua gi truoc", "nên sửa gì trước", "sua cai gi truoc",
+        "sửa cái gì trước", "uu tien sua", "ưu tiên sửa",
+        "what to fix first", "what should i fix", "fix first",
+        "priority findings", "findings uu tien", "risk cao nhat",
+        "rủi ro cao nhất", "top risks",
+    )
+    _PROJECT_ASSIGNMENT_TERMS: tuple[str, ...] = (
+        "ai dang xu ly", "ai đang xử lý", "ai phu trach", "ai phụ trách",
+        "ai chiu trach nhiem", "ai chịu trách nhiệm", "who's working",
+        "who is working", "assigned to", "dang lam viec", "đang làm việc",
+    )
+    _PROJECT_POLICY_TERMS: tuple[str, ...] = (
+        "chinh sach", "chính sách", "policy", "quy dinh", "quy định",
+        "sla policy", "deadline", "thoi han xu ly", "thời hạn xử lý",
+    )
+    _PROJECT_STATUS_TERMS: tuple[str, ...] = (
+        "co van de gi", "có vấn đề gì", "dieu gi sai", "điều gì sai",
+        "wrong with this project", "wrong with the project",
+        "tong quan", "tổng quan", "project overview", "tinh trang",
+        "tình trạng", "security dashboard", "bao mat du an", "bảo mật dự án",
+        "how is the project", "project status", "diem bao mat",
+        "điểm bảo mật", "security score",
+    )
+
+    async def _route_project_scoped(
+        self,
+        text: str,
+        entities: ExtractedEntities,
+        *,
+        project_id: uuid.UUID,
+        caller: AppUser,
+    ) -> ToolRouteResult | None:
+        """Picks which project-context handler (if any) answers this
+        message. Returns ``None`` (never a ``ToolRouteResult``) when nothing
+        matches, so ``try_route`` falls through to the existing flat/global
+        handlers exactly as before this task existed - a project being
+        selected never forces every message through this dispatcher.
+
+        NOTE: this method only decides *which* handler to call - it does
+        NOT itself perform the authorization check. Every handler it calls
+        independently calls ``resolve_project_access`` first, so the check
+        can never be skipped even if this dispatch logic changes later.
+        """
+        if any(term in text for term in self._PROJECT_RESCAN_HISTORY_TERMS):
+            cve_or_rule_id = entities.cves[0] if entities.cves else None
+            return await self._route_rescan_history(project_id, cve_or_rule_id, caller)
+
+        if any(term in text for term in self._PROJECT_OVERDUE_TERMS):
+            return await self._route_overdue(project_id, caller)
+
+        if any(term in text for term in self._PROJECT_FINDINGS_PRIORITY_TERMS):
+            return await self._route_findings_priority(project_id, caller)
+
+        if any(term in text for term in self._PROJECT_ASSIGNMENT_TERMS):
+            return await self._route_assignment(project_id, caller)
+
+        if any(term in text for term in self._PROJECT_POLICY_TERMS):
+            return await self._route_policy(project_id, caller)
+
+        if entities.cves:
+            return await self._route_cve_priority(project_id, entities.cves[0], caller)
+
+        if any(term in text for term in self._PROJECT_STATUS_TERMS):
+            return await self._route_project_status(project_id, caller)
+
+        return None
+
+    @staticmethod
+    def _denial_result(access: ProjectAccessResult, *, tool_name: str) -> ToolRouteResult:
+        """The single place a denial (not-found or forbidden) becomes a
+        ``ToolRouteResult`` - every project-scoped handler returns this
+        immediately when ``access.authorized`` is ``False``, so the exact
+        wording (never a generic "no evidence found" that could be misread
+        as "this project has no problems") is guaranteed consistent."""
+        return ToolRouteResult(
+            handled=True,
+            content=access.denial_message or "Không thể xử lý yêu cầu này.",
+            metadata={
+                "provider": "local",
+                "gemini_called": False,
+                "routing_reason": (
+                    "project_access_denied"
+                    if access.denial_reason == DENIAL_FORBIDDEN
+                    else "project_not_found"
+                ),
+                "tool_name": tool_name,
+                "grounding_status": "NO_EVIDENCE",
+                "confidence": 0.0,
+            },
+        )
+
+    async def _route_project_status(
+        self, project_id: uuid.UUID, caller: AppUser
+    ) -> ToolRouteResult:
+        """Answers "what's wrong with this project?" / project-overview
+        questions using Task 5's dashboard aggregation directly - no ad hoc
+        re-derivation of open/critical counts or the security score."""
+        access = await resolve_project_access(project_id, caller, self._session)
+        if not access.authorized:
+            return self._denial_result(access, tool_name="project_status")
+
+        dashboard = await ProjectDashboardService(self._session).get_security_dashboard(
+            project_id, actor=caller
+        )
+        project = access.project
+        by_sev = dashboard["open_by_severity"]
+        lines = [
+            f"**Tổng quan bảo mật dự án: {project.name}**",
+            "",
+            f"- Điểm bảo mật (Security Score): `{dashboard['security_score']}/100`",
+            f"- Tổng số finding đang mở: `{dashboard['open_findings']}`",
+            f"  - Critical: `{by_sev.get('critical', 0)}` | High: `{by_sev.get('high', 0)}` | "
+            f"Medium: `{by_sev.get('medium', 0)}` | Low: `{by_sev.get('low', 0)}`",
+            f"- Đang chờ xác minh (fixed, chưa verified): `{dashboard['waiting_verify']}`",
+            f"- Quá hạn xử lý (overdue): `{dashboard['overdue']}`",
+            f"- Đã sửa trong 7 ngày qua: `{dashboard['fixed_this_week']}`",
+        ]
+        top_risks = dashboard.get("top_risks") or []
+        if top_risks:
+            lines.append("")
+            lines.append("**Top rủi ro cần chú ý:**")
+            for item in top_risks[:5]:
+                lines.append(
+                    f"- **[{item['severity'].upper()}]** {item['title']} "
+                    f"(`{item['status']}`{', quá hạn' if item['is_overdue'] else ''})"
+                )
+        return ToolRouteResult(
+            handled=True,
+            content="\n".join(lines),
+            metadata={
+                "provider": "local",
+                "gemini_called": False,
+                "routing_reason": "project_status_tool",
+                "tool_name": "project_status",
+                "grounding_status": "GROUNDED",
+                "confidence": 0.95,
+                "tool_runs": [
+                    {
+                        "tool": "project_status",
+                        "status": "success",
+                        "source": "project_dashboard",
+                        "input": {"project_id": str(project_id)},
+                    }
+                ],
+                "suggested_actions": ["Tôi nên sửa gì trước?", "Có gì quá hạn?", "Ai đang xử lý?"],
+            },
+        )
+
+    async def _route_findings_priority(
+        self, project_id: uuid.UUID, caller: AppUser
+    ) -> ToolRouteResult:
+        """Answers "what should I fix first?" using Task 5's
+        ``list_top_risks`` (severity-first, then most-overdue tiebreak) -
+        the same ordering the dashboard's "Top Risks" card uses."""
+        access = await resolve_project_access(project_id, caller, self._session)
+        if not access.authorized:
+            return self._denial_result(access, tool_name="findings_priority")
+
+        findings = await self._finding_repo.list_top_risks(project_id=project_id, limit=10)
+        if not findings:
+            content = (
+                "Không có finding nào đang mở trong project này cần ưu tiên xử lý ngay."
+            )
+        else:
+            lines = ["**Thứ tự ưu tiên xử lý (nghiêm trọng nhất trước):**", ""]
+            for index, finding in enumerate(findings, start=1):
+                overdue_tag = " - **QUÁ HẠN**" if sla_service.is_overdue(finding) else ""
+                lines.append(
+                    f"{index}. **[{finding.severity.upper()}]** {finding.title} "
+                    f"(`{finding.status}`){overdue_tag}"
+                )
+            content = "\n".join(lines)
+        return ToolRouteResult(
+            handled=True,
+            content=content,
+            metadata={
+                "provider": "local",
+                "gemini_called": False,
+                "routing_reason": "findings_priority_tool",
+                "tool_name": "findings_priority",
+                "grounding_status": "GROUNDED",
+                "confidence": 0.95,
+                "tool_runs": [
+                    {
+                        "tool": "findings_priority",
+                        "status": "success",
+                        "source": "finding_repository",
+                        "input": {"project_id": str(project_id)},
+                        "result_count": len(findings),
+                    }
+                ],
+                "suggested_actions": ["Ai đang xử lý?", "Có gì quá hạn?"],
+            },
+        )
+
+    async def _route_assignment(self, project_id: uuid.UUID, caller: AppUser) -> ToolRouteResult:
+        """Answers "who's working on this?" / "ai đang xử lý lỗi X?" -
+        lists currently-assigned open findings for the project."""
+        access = await resolve_project_access(project_id, caller, self._session)
+        if not access.authorized:
+            return self._denial_result(access, tool_name="assignment")
+
+        findings = await self._finding_repo.list_assigned_open(project_id=project_id, limit=20)
+        if not findings:
+            content = "Hiện chưa có finding nào trong project này được giao cho ai xử lý."
+        else:
+            lines = ["**Finding đang được giao xử lý:**", ""]
+            for finding in findings:
+                lines.append(
+                    f"- **[{finding.severity.upper()}]** {finding.title} (`{finding.status}`) - "
+                    f"Người xử lý: `{finding.assignee_user_id}`"
+                )
+            content = "\n".join(lines)
+        return ToolRouteResult(
+            handled=True,
+            content=content,
+            metadata={
+                "provider": "local",
+                "gemini_called": False,
+                "routing_reason": "assignment_tool",
+                "tool_name": "assignment",
+                "grounding_status": "GROUNDED",
+                "confidence": 0.9,
+                "tool_runs": [
+                    {
+                        "tool": "assignment",
+                        "status": "success",
+                        "source": "finding_repository",
+                        "input": {"project_id": str(project_id)},
+                        "result_count": len(findings),
+                    }
+                ],
+            },
+        )
+
+    async def _route_overdue(self, project_id: uuid.UUID, caller: AppUser) -> ToolRouteResult:
+        """Answers "what's overdue?" - reuses ``sla.is_overdue`` (the single
+        source of truth for overdue-ness) rather than reimplementing the
+        deadline/terminal-status check here."""
+        access = await resolve_project_access(project_id, caller, self._session)
+        if not access.authorized:
+            return self._denial_result(access, tool_name="overdue")
+
+        candidates = await self._finding_repo.list_all_for_project_unpaginated(
+            project_id=project_id, status=None, severity=None, assignee_user_id=None
+        )
+        overdue_findings = [f for f in candidates if sla_service.is_overdue(f)]
+        if not overdue_findings:
+            content = "Không có finding nào đang quá hạn xử lý trong project này."
+        else:
+            lines = ["**Finding đang quá hạn xử lý (overdue):**", ""]
+            for finding in overdue_findings:
+                deadline = finding.deadline.isoformat() if finding.deadline else "N/A"
+                lines.append(
+                    f"- **[{finding.severity.upper()}]** {finding.title} (`{finding.status}`) - "
+                    f"Hạn xử lý: `{deadline}`"
+                )
+            content = "\n".join(lines)
+        return ToolRouteResult(
+            handled=True,
+            content=content,
+            metadata={
+                "provider": "local",
+                "gemini_called": False,
+                "routing_reason": "overdue_tool",
+                "tool_name": "overdue",
+                "grounding_status": "GROUNDED",
+                "confidence": 0.95,
+                "tool_runs": [
+                    {
+                        "tool": "overdue",
+                        "status": "success",
+                        "source": "sla_service",
+                        "input": {"project_id": str(project_id)},
+                        "result_count": len(overdue_findings),
+                    }
+                ],
+            },
+        )
+
+    async def _route_rescan_history(
+        self, project_id: uuid.UUID, cve_or_rule_id: str | None, caller: AppUser
+    ) -> ToolRouteResult:
+        """Answers "did the previous scan have this?" / "was this fixed?" -
+        reads already-computed Finding/FindingTransition state, never
+        reimplements Task 3's fingerprint/diff logic."""
+        access = await resolve_project_access(project_id, caller, self._session)
+        if not access.authorized:
+            return self._denial_result(access, tool_name="rescan_history")
+
+        if not cve_or_rule_id:
+            return ToolRouteResult(
+                handled=True,
+                content=(
+                    "Bạn muốn kiểm tra lịch sử của CVE hoặc rule nào? Vui lòng cho tôi biết "
+                    "mã CVE cụ thể (ví dụ CVE-2021-44228)."
+                ),
+                metadata={
+                    "provider": "local",
+                    "gemini_called": False,
+                    "routing_reason": "rescan_history_tool",
+                    "tool_name": "rescan_history",
+                    "grounding_status": "NO_EVIDENCE",
+                    "confidence": 0.0,
+                },
+            )
+
+        is_cve = cve_or_rule_id.strip().upper().startswith("CVE-")
+        findings = await self._finding_repo.list_by_cve_or_rule(
+            project_id=project_id,
+            cve_id=cve_or_rule_id.strip().upper() if is_cve else None,
+            rule_id=None if is_cve else cve_or_rule_id,
+        )
+        if not findings:
+            content = (
+                f"Không tìm thấy finding nào ứng với `{cve_or_rule_id}` trong project này - "
+                "có thể chưa từng được phát hiện ở bất kỳ lần quét nào."
+            )
+        else:
+            latest = findings[0]
+            transitions = await self._finding_repo.list_transitions(latest.id)
+            was_fixed = latest.status in ("closed", "fixed", "verified")
+            lines = [
+                f"**Lịch sử `{cve_or_rule_id}` trong project này:**",
+                "",
+                f"- Trạng thái hiện tại: `{latest.status}`"
+                + (" (đã được xử lý)" if was_fixed else " (chưa được xử lý xong)"),
+                f"- Lần đầu phát hiện: scan run `{latest.first_seen_scan_run_id}`",
+                f"- Lần gần nhất còn thấy: scan run `{latest.last_seen_scan_run_id}`",
+                f"- Số lần chuyển trạng thái: `{len(transitions)}`",
+            ]
+            if len(findings) > 1:
+                lines.append(
+                    f"- Có `{len(findings)}` finding liên quan đến `{cve_or_rule_id}` trong "
+                    "project này (hiển thị bản ghi mới nhất ở trên)."
+                )
+            content = "\n".join(lines)
+        return ToolRouteResult(
+            handled=True,
+            content=content,
+            metadata={
+                "provider": "local",
+                "gemini_called": False,
+                "routing_reason": "rescan_history_tool",
+                "tool_name": "rescan_history",
+                "grounding_status": "GROUNDED" if findings else "NO_EVIDENCE",
+                "confidence": 0.9 if findings else 0.0,
+                "tool_runs": [
+                    {
+                        "tool": "rescan_history",
+                        "status": "success",
+                        "source": "finding_repository",
+                        "input": {"project_id": str(project_id), "identifier": cve_or_rule_id},
+                        "result_count": len(findings),
+                    }
+                ],
+            },
+        )
+
+    async def _route_cve_priority(
+        self, project_id: uuid.UUID, cve_id: str, caller: AppUser
+    ) -> ToolRouteResult:
+        """Answers "how do I fix this CVE?" / priority questions for a
+        specific CVE in this project - surfaces Task 6's already-computed
+        ``CveAssessment.rationale`` verbatim, never recomputes priority."""
+        access = await resolve_project_access(project_id, caller, self._session)
+        if not access.authorized:
+            return self._denial_result(access, tool_name="cve_priority")
+
+        normalized_cve = cve_id.strip().upper()
+        assessment = await self._cve_assessment_repo.get_by_project_and_cve(
+            project_id=project_id, cve_id=normalized_cve
+        )
+        if assessment is None:
+            content = (
+                f"Project này chưa có đánh giá ưu tiên (CVE Risk Prioritization) cho "
+                f"`{normalized_cve}`. Hãy chạy đánh giá CVE cho project này trước để tôi có "
+                "dữ liệu ưu tiên/khuyến nghị xử lý chính xác."
+            )
+            return ToolRouteResult(
+                handled=True,
+                content=content,
+                metadata={
+                    "provider": "local",
+                    "gemini_called": False,
+                    "routing_reason": "cve_priority_tool",
+                    "tool_name": "cve_priority",
+                    "grounding_status": "NO_EVIDENCE",
+                    "confidence": 0.0,
+                },
+            )
+
+        rationale = assessment.rationale or {}
+        lines = [
+            f"**Ưu tiên xử lý {normalized_cve} trong project này:**",
+            "",
+            f"- Mức ưu tiên: `{assessment.priority}`",
+            f"- Điểm số: `{assessment.score}/10`",
+        ]
+        if assessment.cvss_score is not None:
+            lines.append(f"- CVSS: `{assessment.cvss_score}`")
+        if assessment.epss_score is not None:
+            lines.append(f"- EPSS: `{assessment.epss_score}`")
+        lines.append(f"- CISA KEV (đang bị khai thác thực tế): `{'có' if assessment.is_kev else 'không'}`")
+        if rationale.get("reasoning"):
+            lines.append("")
+            lines.append(f"**Lý do:** {rationale['reasoning']}")
+        return ToolRouteResult(
+            handled=True,
+            content="\n".join(lines),
+            metadata={
+                "provider": "local",
+                "gemini_called": False,
+                "routing_reason": "cve_priority_tool",
+                "tool_name": "cve_priority",
+                "grounding_status": "GROUNDED",
+                "confidence": 0.95,
+                "tool_runs": [
+                    {
+                        "tool": "cve_priority",
+                        "status": "success",
+                        "source": "cve_assessment_repository",
+                        "input": {"project_id": str(project_id), "cve_id": normalized_cve},
+                    }
+                ],
+                "suggested_actions": ["Giải thích dễ hiểu", "Finding nào liên quan?"],
+            },
+        )
+
+    async def _route_policy(self, project_id: uuid.UUID, caller: AppUser) -> ToolRouteResult:
+        """Answers "what does policy say?" - reuses Task 3's SLA policy
+        lookup (project override, else global default) rather than
+        reimplementing the precedence rule ``sla.compute_deadline`` already
+        encodes."""
+        access = await resolve_project_access(project_id, caller, self._session)
+        if not access.authorized:
+            return self._denial_result(access, tool_name="policy")
+
+        lines = ["**Chính sách SLA (thời hạn xử lý) áp dụng cho project này:**", ""]
+        for severity in ("critical", "high", "medium", "low"):
+            override = await self._sla_policy_repo.get_project_override(
+                project_id=project_id, severity=severity
+            )
+            if override is not None:
+                lines.append(
+                    f"- **{severity.upper()}**: `{override.hours_to_deadline}` giờ "
+                    "(tùy chỉnh riêng cho project này)"
+                )
+                continue
+            global_policy = await self._sla_policy_repo.get_global(severity)
+            if global_policy is not None:
+                lines.append(
+                    f"- **{severity.upper()}**: `{global_policy.hours_to_deadline}` giờ "
+                    "(mặc định toàn hệ thống)"
+                )
+            else:
+                lines.append(f"- **{severity.upper()}**: không áp dụng thời hạn SLA cụ thể.")
+        return ToolRouteResult(
+            handled=True,
+            content="\n".join(lines),
+            metadata={
+                "provider": "local",
+                "gemini_called": False,
+                "routing_reason": "policy_tool",
+                "tool_name": "policy",
+                "grounding_status": "GROUNDED",
+                "confidence": 0.95,
+                "tool_runs": [
+                    {
+                        "tool": "policy",
+                        "status": "success",
+                        "source": "sla_policy_repository",
+                        "input": {"project_id": str(project_id)},
+                    }
+                ],
+            },
+        )
 
     #: Matches an explicit step-count request ("checklist 5 bước", "5 steps",
     #: "5-step checklist") so the response can honor it instead of always
