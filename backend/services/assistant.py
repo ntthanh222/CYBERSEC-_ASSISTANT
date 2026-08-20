@@ -146,8 +146,16 @@ class AssistantService:
         *,
         provider: Optional[BaseLLMProvider] = None,
         retriever: Optional[RagRetriever] = None,
+        authz_session: Optional[AsyncSession] = None,
     ) -> None:
         self._session = session
+        #: Non-RLS session for AppDataToolRouter's project-authorization
+        #: check (Task 8) - see AppDataToolRouter.__init__'s authz_session
+        #: docstring. ``session`` here is normally RLS-scoped (the
+        #: /api/chatbot/chat route's get_rls_db), so this must be a
+        #: separate, independently-injected get_db session, not derived
+        #: from ``session``.
+        self._authz_session = authz_session
         self._repo = ConversationRepository(session)
         self._provider = provider or get_llm_provider()
         self._retriever = retriever or get_rag_retriever_for_session(session)
@@ -292,7 +300,7 @@ class AssistantService:
         provider, _selection_reason = select_provider(
             mode=mode, intent=intent, default_provider=self._provider
         )
-        tool_router = AppDataToolRouter(self._session)
+        tool_router = AppDataToolRouter(self._session, authz_session=self._authz_session)
         tool_result = await tool_router.try_route(
             normalized.normalized_query or content,
             entities,

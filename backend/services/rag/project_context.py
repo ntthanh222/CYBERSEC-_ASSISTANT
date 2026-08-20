@@ -81,6 +81,16 @@ async def resolve_project_access(
     handler must call first, before touching Finding/ScanRun/CveAssessment
     data.
 
+    ``session`` MUST be a non-RLS session (``backend.database.session.get_db``,
+    never ``get_rls_db``) - see ``AppDataToolRouter.__init__``'s
+    ``authz_session`` docstring for why: Postgres RLS on ``projects`` already
+    hides rows a caller isn't a member of, so running this check on an
+    RLS-scoped session would make ``ProjectRepository.get`` return ``None``
+    for a non-member exactly as it would for a genuinely nonexistent
+    project, silently collapsing the mandated FORBIDDEN response into
+    NOT_FOUND in production. Mirrors ``backend.core.project_authorization``'s
+    own ``get_db``-over-``get_rls_db`` choice for the identical reason.
+
     Checks, in order:
     1. Does the project exist at all? If not -> ``DENIAL_NOT_FOUND``.
     2. Is the caller a global admin/super_admin? -> authorized (bypass).

@@ -80,8 +80,23 @@ def _humanize_affected_products(raw_products, *, limit: int = 5) -> list[str]:
 class AppDataToolRouter:
     """Routing layer that queries system repositories deterministically."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, *, authz_session: AsyncSession | None = None) -> None:
         self._session = session
+        #: The session ``resolve_project_access`` (Task 8) uses. MUST be a
+        #: non-RLS session (e.g. ``backend.database.session.get_db``, never
+        #: ``get_rls_db``) - the ``/api/chatbot/chat`` route's main session
+        #: is RLS-scoped, and Postgres RLS on ``projects`` already hides
+        #: rows the caller isn't a member of. If the authorization check ran
+        #: on that same RLS session, ``ProjectRepository.get`` would return
+        #: ``None`` for a non-member project exactly as it would for a
+        #: genuinely nonexistent one, making the "forbidden" branch dead
+        #: code in production and silently collapsing it into "not found" -
+        #: this is the same reason ``backend.core.project_authorization``
+        #: uses ``get_db`` rather than ``get_rls_db`` for its own check.
+        #: Falls back to ``session`` when not supplied (e.g. a test/caller
+        #: with only one, already-non-RLS session) - callers that DO have a
+        #: separate RLS session must pass it explicitly.
+        self._authz_session = authz_session if authz_session is not None else session
         self._asset_repo = AssetRepository(session)
         self._incident_repo = IncidentRepository(session)
         self._alert_repo = AlertRepository(session)
@@ -111,6 +126,18 @@ class AppDataToolRouter:
         if intent == "knowledge_rag":
             return ToolRouteResult(handled=False)
 
+        # A compromise claim ("website bị tấn công") always routes to
+        # incident-response guidance, even if the message also contains a
+        # URL or a stale CVE carried over from a previous turn - and, per a
+        # Task 8 security-review fix, even if a project is selected: an
+        # active-incident report must never be misrouted into a project
+        # status/overdue table just because it happens to share a keyword
+        # with one of the new project-scoped handlers below. Checked before
+        # the project-scoped dispatch for exactly the same reason the
+        # knowledge_rag short-circuit above is.
+        if intent == "incident_response":
+            return self._route_incident_response(text)
+
         # Project-scoped routes (Task 8: AI Project Security Copilot) - only
         # engaged when the caller has actually selected a project (an
         # explicit project_id parameter threaded from the chat request, see
@@ -119,19 +146,15 @@ class AppDataToolRouter:
         # task existed. Checked before every other branch below so a
         # project-scoped question is never accidentally answered by the
         # flat/global handlers (e.g. a project-selected CVE question must
-        # get project-aware priority context, not the generic CVE lookup).
+        # get project-aware priority context, not the generic CVE lookup) -
+        # but AFTER the knowledge_rag/incident_response short-circuits
+        # above, which must always win regardless of project selection.
         if project_id is not None and caller is not None:
             project_result = await self._route_project_scoped(
                 text, entities, project_id=project_id, caller=caller
             )
             if project_result is not None:
                 return project_result
-
-        # A compromise claim ("website bị tấn công") always routes to
-        # incident-response guidance, even if the message also contains a
-        # URL or a stale CVE carried over from a previous turn.
-        if intent == "incident_response":
-            return self._route_incident_response(text)
 
         # SQLi/SSRF/CSP each have their own intent (see backend/services/intent.py)
         # purely so a message about one of these topics is never left
@@ -494,7 +517,7 @@ class AppDataToolRouter:
         """Answers "what's wrong with this project?" / project-overview
         questions using Task 5's dashboard aggregation directly - no ad hoc
         re-derivation of open/critical counts or the security score."""
-        access = await resolve_project_access(project_id, caller, self._session)
+        access = await resolve_project_access(project_id, caller, self._authz_session)
         if not access.authorized:
             return self._denial_result(access, tool_name="project_status")
 
@@ -551,7 +574,7 @@ class AppDataToolRouter:
         """Answers "what should I fix first?" using Task 5's
         ``list_top_risks`` (severity-first, then most-overdue tiebreak) -
         the same ordering the dashboard's "Top Risks" card uses."""
-        access = await resolve_project_access(project_id, caller, self._session)
+        access = await resolve_project_access(project_id, caller, self._authz_session)
         if not access.authorized:
             return self._denial_result(access, tool_name="findings_priority")
 
@@ -595,7 +618,7 @@ class AppDataToolRouter:
     async def _route_assignment(self, project_id: uuid.UUID, caller: AppUser) -> ToolRouteResult:
         """Answers "who's working on this?" / "ai đang xử lý lỗi X?" -
         lists currently-assigned open findings for the project."""
-        access = await resolve_project_access(project_id, caller, self._session)
+        access = await resolve_project_access(project_id, caller, self._authz_session)
         if not access.authorized:
             return self._denial_result(access, tool_name="assignment")
 
@@ -632,11 +655,24 @@ class AppDataToolRouter:
             },
         )
 
+    #: How many overdue findings the response body lists, matching the
+    #: display cap other handlers use (e.g. ``_route_assignment``'s 20) -
+    #: a security-review fix: printing every overdue finding unbounded was
+    #: the only new handler without such a cap.
+    _OVERDUE_DISPLAY_LIMIT = 20
+
+    #: Severity -> sort rank, most severe first - a plain Python dict (not
+    #: FindingRepository._SEVERITY_RANK, which is a SQLAlchemy `case()`
+    #: usable only inside a query) since overdue-ness itself is computed in
+    #: Python from ``sla.is_overdue`` after the fetch, so the display order
+    #: is also applied in Python.
+    _SEVERITY_DISPLAY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+
     async def _route_overdue(self, project_id: uuid.UUID, caller: AppUser) -> ToolRouteResult:
         """Answers "what's overdue?" - reuses ``sla.is_overdue`` (the single
         source of truth for overdue-ness) rather than reimplementing the
         deadline/terminal-status check here."""
-        access = await resolve_project_access(project_id, caller, self._session)
+        access = await resolve_project_access(project_id, caller, self._authz_session)
         if not access.authorized:
             return self._denial_result(access, tool_name="overdue")
 
@@ -644,16 +680,21 @@ class AppDataToolRouter:
             project_id=project_id, status=None, severity=None, assignee_user_id=None
         )
         overdue_findings = [f for f in candidates if sla_service.is_overdue(f)]
+        overdue_findings.sort(key=lambda f: self._SEVERITY_DISPLAY_RANK.get(f.severity, 4))
+        total_overdue = len(overdue_findings)
+        displayed = overdue_findings[: self._OVERDUE_DISPLAY_LIMIT]
         if not overdue_findings:
             content = "Không có finding nào đang quá hạn xử lý trong project này."
         else:
-            lines = ["**Finding đang quá hạn xử lý (overdue):**", ""]
-            for finding in overdue_findings:
+            lines = [f"**Finding đang quá hạn xử lý (overdue) - tổng `{total_overdue}`:**", ""]
+            for finding in displayed:
                 deadline = finding.deadline.isoformat() if finding.deadline else "N/A"
                 lines.append(
                     f"- **[{finding.severity.upper()}]** {finding.title} (`{finding.status}`) - "
                     f"Hạn xử lý: `{deadline}`"
                 )
+            if total_overdue > len(displayed):
+                lines.append(f"- ... và `{total_overdue - len(displayed)}` finding quá hạn khác.")
             content = "\n".join(lines)
         return ToolRouteResult(
             handled=True,
@@ -671,7 +712,7 @@ class AppDataToolRouter:
                         "status": "success",
                         "source": "sla_service",
                         "input": {"project_id": str(project_id)},
-                        "result_count": len(overdue_findings),
+                        "result_count": total_overdue,
                     }
                 ],
             },
@@ -683,7 +724,7 @@ class AppDataToolRouter:
         """Answers "did the previous scan have this?" / "was this fixed?" -
         reads already-computed Finding/FindingTransition state, never
         reimplements Task 3's fingerprint/diff logic."""
-        access = await resolve_project_access(project_id, caller, self._session)
+        access = await resolve_project_access(project_id, caller, self._authz_session)
         if not access.authorized:
             return self._denial_result(access, tool_name="rescan_history")
 
@@ -718,12 +759,19 @@ class AppDataToolRouter:
         else:
             latest = findings[0]
             transitions = await self._finding_repo.list_transitions(latest.id)
-            was_fixed = latest.status in ("closed", "fixed", "verified")
+            # Reuses sla.TERMINAL_STATUSES (closed/false_positive/
+            # accepted_risk) - the same single source of truth
+            # is_overdue/count_open_by_severity/etc. already use for "this
+            # finding is done, one way or another" - rather than hand-rolling
+            # a separate status list here (a security-review fix: the
+            # original list of ("closed", "fixed", "verified") wrongly
+            # excluded false_positive/accepted_risk, which are terminal too).
+            is_resolved = latest.status in sla_service.TERMINAL_STATUSES
             lines = [
                 f"**Lịch sử `{cve_or_rule_id}` trong project này:**",
                 "",
                 f"- Trạng thái hiện tại: `{latest.status}`"
-                + (" (đã được xử lý)" if was_fixed else " (chưa được xử lý xong)"),
+                + (" (đã được xử lý)" if is_resolved else " (chưa được xử lý xong)"),
                 f"- Lần đầu phát hiện: scan run `{latest.first_seen_scan_run_id}`",
                 f"- Lần gần nhất còn thấy: scan run `{latest.last_seen_scan_run_id}`",
                 f"- Số lần chuyển trạng thái: `{len(transitions)}`",
@@ -762,7 +810,7 @@ class AppDataToolRouter:
         """Answers "how do I fix this CVE?" / priority questions for a
         specific CVE in this project - surfaces Task 6's already-computed
         ``CveAssessment.rationale`` verbatim, never recomputes priority."""
-        access = await resolve_project_access(project_id, caller, self._session)
+        access = await resolve_project_access(project_id, caller, self._authz_session)
         if not access.authorized:
             return self._denial_result(access, tool_name="cve_priority")
 
@@ -771,23 +819,26 @@ class AppDataToolRouter:
             project_id=project_id, cve_id=normalized_cve
         )
         if assessment is None:
-            content = (
-                f"Project này chưa có đánh giá ưu tiên (CVE Risk Prioritization) cho "
-                f"`{normalized_cve}`. Hãy chạy đánh giá CVE cho project này trước để tôi có "
-                "dữ liệu ưu tiên/khuyến nghị xử lý chính xác."
-            )
-            return ToolRouteResult(
-                handled=True,
-                content=content,
-                metadata={
-                    "provider": "local",
-                    "gemini_called": False,
-                    "routing_reason": "cve_priority_tool",
-                    "tool_name": "cve_priority",
-                    "grounding_status": "NO_EVIDENCE",
-                    "confidence": 0.0,
-                },
-            )
+            # Security-review fix: a project selection must never silently
+            # disable the pre-existing generic CVE lookup handler. No
+            # project-specific priority assessment existing yet is not the
+            # same as "no CVE information available" - fall back to the
+            # existing, unmodified _route_cve so the caller still gets real
+            # NVD-backed CVE data (description/CVSS/etc.), with a note that
+            # no project-specific assessment has been run yet.
+            generic_result = await self._route_cve(normalized_cve, query="")
+            if generic_result.handled:
+                note = (
+                    f"\n\n_(Project này chưa có đánh giá ưu tiên CVE Risk Prioritization "
+                    f"riêng cho `{normalized_cve}` - phần trên là dữ liệu CVE chung, chưa "
+                    "gắn với bối cảnh project.)_"
+                )
+                return ToolRouteResult(
+                    handled=True,
+                    content=generic_result.content + note,
+                    metadata=generic_result.metadata,
+                )
+            return generic_result
 
         rationale = assessment.rationale or {}
         lines = [
@@ -831,7 +882,7 @@ class AppDataToolRouter:
         lookup (project override, else global default) rather than
         reimplementing the precedence rule ``sla.compute_deadline`` already
         encodes."""
-        access = await resolve_project_access(project_id, caller, self._session)
+        access = await resolve_project_access(project_id, caller, self._authz_session)
         if not access.authorized:
             return self._denial_result(access, tool_name="policy")
 

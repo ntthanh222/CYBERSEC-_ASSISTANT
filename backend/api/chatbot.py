@@ -22,7 +22,7 @@ from backend.core.auth import AuthenticatedUser, get_current_user
 from backend.core.authorization import AppUser, get_app_user
 from backend.core.rate_limit import rate_limit
 from backend.database.models.conversation import Conversation, Message
-from backend.database.session import get_rls_db
+from backend.database.session import get_db, get_rls_db
 from backend.schemas.chatbot import (
     ChatRequest,
     ChatResponse,
@@ -99,11 +99,21 @@ async def chat(
     request: Request,
     payload: ChatRequest,
     session: AsyncSession = Depends(get_rls_db),
+    # Separate, non-RLS session for AppDataToolRouter's project-membership
+    # authorization check (Task 8) - see AppDataToolRouter.__init__'s
+    # authz_session docstring. Must not be the RLS-scoped `session` above:
+    # Postgres RLS on `projects` already hides rows the caller isn't a
+    # member of, which would make the "forbidden" (vs "not found") branch
+    # unreachable if the check ran on that session instead. Resolves to the
+    # same underlying dependency `get_app_user` itself already depends on,
+    # so this adds no extra DB connection beyond what the route already
+    # opens for role resolution.
+    authz_session: AsyncSession = Depends(get_db),
     user: AuthenticatedUser = Depends(get_current_user),
     app_user: AppUser = Depends(get_app_user),
     actor: str = Depends(get_current_actor),
 ) -> dict:
-    service = AssistantService(session)
+    service = AssistantService(session, authz_session=authz_session)
     conversation, message = await service.chat(
         message=payload.message,
         conversation_id=payload.conversation_id,

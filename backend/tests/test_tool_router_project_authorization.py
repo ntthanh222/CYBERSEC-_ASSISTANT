@@ -612,3 +612,128 @@ async def test_try_route_denies_non_member_via_dispatch(db_sessionmaker):
         )
         assert result.handled is True
         assert result.content == ACCESS_DENIED_MESSAGE
+
+
+# ---------------------------------------------------------------------------
+# Security-review fix round 1 regression tests
+# ---------------------------------------------------------------------------
+
+
+async def test_resolve_project_access_uses_authz_session_not_self_session(
+    db_sessionmaker, tmp_path
+):
+    """Regression test for the RLS-session finding: AppDataToolRouter must
+    run resolve_project_access on `authz_session`, never `self._session`.
+
+    Simulated without a real Postgres RLS policy by giving `self._session`
+    a completely EMPTY database (as if RLS had hidden every row, including
+    the project itself, from a non-member caller) and `authz_session` a
+    SEPARATE database that actually has the project seeded with no
+    membership row for the caller. If the code regressed to checking
+    `self._session` instead of `authz_session`, `ProjectRepository.get`
+    would return None there and the caller would incorrectly get the
+    NOT_FOUND message; the fix must produce the FORBIDDEN message instead,
+    proving the check ran against `authz_session`.
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from backend.database.base import Base
+
+    authz_db_path = tmp_path / "authz-only.db"
+    sync_engine = create_engine(f"sqlite:///{authz_db_path}")
+    Base.metadata.create_all(sync_engine)
+    sync_engine.dispose()
+    authz_sessionmaker = async_sessionmaker(
+        bind=create_async_engine(f"sqlite+aiosqlite:///{authz_db_path}"),
+        expire_on_commit=False,
+        autoflush=False,
+    )
+
+    creator_id = uuid.uuid4()
+    async with authz_sessionmaker() as seed_session:
+        _ws, project = await _seed_workspace_and_project(seed_session, creator_id=creator_id)
+        project_id = project.id
+
+    # `session` (the "RLS" stand-in) comes from db_sessionmaker - a totally
+    # separate, freshly-created empty database that has never heard of this
+    # project at all.
+    async with db_sessionmaker() as rls_like_session, authz_sessionmaker() as authz_session:
+        router = AppDataToolRouter(rls_like_session, authz_session=authz_session)
+        result = await router._route_project_status(project_id, _app_user())
+
+        assert result.content == ACCESS_DENIED_MESSAGE
+        assert result.metadata["routing_reason"] == "project_access_denied"
+        # The broken-before-the-fix behavior would have been "not found",
+        # since that empty `session` has no project row at all.
+        assert result.metadata["routing_reason"] != "project_not_found"
+
+
+async def test_cve_priority_falls_back_to_generic_cve_lookup_when_no_assessment_exists(
+    db_sessionmaker, monkeypatch
+):
+    """Regression test for the CVE-fallback finding: selecting a project
+    must never silently disable the pre-existing generic CVE handler just
+    because no project-specific CveAssessment has been run yet."""
+
+    async def fake_get(self, raw_cve_id, *, actor):
+        return {
+            "cve_id": raw_cve_id,
+            "description": "Test-only CVE record from mocked provider.",
+            "published_at": None,
+            "modified_at": None,
+            "cvss_score": 7.5,
+            "severity": "HIGH",
+            "vector": None,
+            "affected_products": [],
+            "references": [],
+            "source": "nvd",
+        }
+
+    monkeypatch.setattr("backend.services.rag.tool_router.CveLookupService.get", fake_get)
+
+    async with db_sessionmaker() as session:
+        creator_id = uuid.uuid4()
+        _ws, project = await _seed_workspace_and_project(session, creator_id=creator_id)
+        member_id = uuid.uuid4()
+        await _add_member(session, project_id=project.id, user_id=member_id)
+        # Deliberately no CveAssessment seeded for this project/CVE pair.
+
+        router = AppDataToolRouter(session)
+        result = await router._route_cve_priority(
+            project.id, "CVE-2099-99999", _app_user(member_id)
+        )
+
+        assert result.handled is True
+        assert result.content != ACCESS_DENIED_MESSAGE
+        # Must still surface real CVE data from the generic handler...
+        assert "Test-only CVE record" in result.content
+        # ...while noting no project-specific assessment exists yet.
+        assert "chưa có đánh giá ưu tiên" in result.content.lower()
+
+
+async def test_try_route_incident_response_wins_over_project_scoped_dispatch(db_sessionmaker):
+    """Regression test for the incident_response-precedence finding: an
+    active-incident report must never be misrouted into a project
+    status/overdue table just because the message also shares wording with
+    one of the new project-scoped keyword lists (here, "tình trạng" also
+    matches the project_status keyword list)."""
+    async with db_sessionmaker() as session:
+        creator_id = uuid.uuid4()
+        _ws, project = await _seed_workspace_and_project(session, creator_id=creator_id)
+        member_id = uuid.uuid4()
+        await _add_member(session, project_id=project.id, user_id=member_id)
+
+        router = AppDataToolRouter(session)
+        result = await router.try_route(
+            "Website của project này đang bị tấn công, tình trạng nghiêm trọng!",
+            ExtractedEntities(),
+            user_id=member_id,
+            intent="incident_response",
+            project_id=project.id,
+            caller=_app_user(member_id),
+        )
+
+        assert result.handled is True
+        assert result.metadata["tool_name"] == "incident_response_guidance"
+        assert result.metadata.get("routing_reason") != "project_status_tool"
