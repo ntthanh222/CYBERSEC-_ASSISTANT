@@ -14,6 +14,7 @@ from backend.api.alerts import router as alerts_router
 from backend.api.attack_graph import router as attack_graph_router
 from backend.api.assets import router as assets_router
 from backend.api.chatbot import router as chatbot_router
+from backend.api.cve_priority import router as cve_priority_router
 from backend.api.cves import router as cves_router
 from backend.api.demo import router as demo_router
 from backend.api.findings import router as findings_router
@@ -225,6 +226,7 @@ app.include_router(findings_router)
 app.include_router(my_tasks_router)
 app.include_router(sla_policies_admin_router)
 app.include_router(sla_policies_project_router)
+app.include_router(cve_priority_router)
 
 
 def _request_id_from(request: Request) -> str:

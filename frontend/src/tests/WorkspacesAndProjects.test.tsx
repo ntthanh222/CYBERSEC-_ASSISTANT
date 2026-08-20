@@ -161,6 +161,7 @@ describe('Project Detail View — real backend', () => {
       const u = String(url);
       if (u.includes(`/api/projects/${PROJECT_1.id}/members`)) return listResponse([]);
       if (u.includes(`/api/projects/${PROJECT_1.id}/findings`)) return listResponse([]);
+      if (u.includes(`/api/projects/${PROJECT_1.id}/cve-assessments`)) return jsonResponse([]);
       if (u.includes(`/api/projects/${PROJECT_1.id}/dashboard`)) {
         return jsonResponse({
           project_id: PROJECT_1.id,

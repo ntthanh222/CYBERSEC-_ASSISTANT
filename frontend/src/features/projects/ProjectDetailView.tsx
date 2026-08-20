@@ -16,6 +16,7 @@ import { ApiError } from '../../lib/api/client';
 import { AlertTriangle, RefreshCw, UserPlus, Trash2, Plus } from 'lucide-react';
 import { FindingListView } from '../findings/FindingListView';
 import { ProjectSecurityDashboardView } from '../security-dashboard/ProjectSecurityDashboardView';
+import { ProjectCvePriorityView } from '../cve-priority/ProjectCvePriorityView';
 
 const ROLE_OPTIONS: ProjectRole[] = ['owner', 'security', 'developer', 'viewer'];
 type Tab = 'overview' | 'members' | 'technologies' | 'security';
@@ -312,6 +313,7 @@ export const ProjectDetailView: React.FC = () => {
       {tab === 'security' && (
         <div className="space-y-6" data-testid="project-security">
           <ProjectSecurityDashboardView projectId={project.id} />
+          <ProjectCvePriorityView projectId={project.id} />
           <FindingListView projectId={project.id} />
         </div>
       )}

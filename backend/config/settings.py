@@ -198,6 +198,30 @@ class Settings(BaseSettings):
     url_scan_max_redirects: int = Field(default=5)
     url_scan_max_response_bytes: int = Field(default=512_000)
 
+    # Task 6 (CVE Risk Prioritization): EPSS and CISA KEV are both public,
+    # keyless feeds (verified against their published documentation - see
+    # backend/providers/enrichment/epss.py and kev.py's module docstrings)
+    # so unlike nist_nvd_api_key above, there is no API-key field to add
+    # here. Base URLs are still configurable (same rationale as
+    # NvdProvider.DEFAULT_BASE_URL being overridable) in case an operator
+    # needs to point at a mirror/proxy. EPSS reuses cve_cache_ttl_seconds'
+    # order of magnitude (per-CVE data, refreshed roughly as often as CVSS
+    # data is). KEV gets its own, much longer TTL: it is a whole-catalog
+    # download, not a per-CVE call, and CISA updates it infrequently (at
+    # most a few times a week), so caching it for hours rather than the
+    # ~1 hour CVE/EPSS TTL avoids re-downloading a multi-hundred-KB feed
+    # on every assessment without going stale in any way that matters for
+    # prioritization purposes.
+    epss_base_url: str = Field(
+        default="https://api.first.org/data/v1/epss", validation_alias="EPSS_BASE_URL"
+    )
+    epss_cache_ttl_seconds: int = Field(default=3600, validation_alias="EPSS_CACHE_TTL_SECONDS")
+    kev_feed_url: str = Field(
+        default="https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+        validation_alias="KEV_FEED_URL",
+    )
+    kev_cache_ttl_seconds: int = Field(default=21_600, validation_alias="KEV_CACHE_TTL_SECONDS")
+
     @property
     def cors_origin_list(self) -> List[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

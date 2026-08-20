@@ -7,6 +7,7 @@ from backend.database.models.asset import Asset
 from backend.database.models.alert import AlertRecord
 from backend.database.models.attack_graph import AttackGraphEdge, AttackGraphNode
 from backend.database.models.conversation import Conversation, Message
+from backend.database.models.cve_assessment import CveAssessment
 from backend.database.models.finding import Finding, FindingTransition
 from backend.database.models.incident import IncidentRecord, IncidentTask, IncidentTimelineEvent
 from backend.database.models.knowledge import KnowledgeChunk, KnowledgeDocument
@@ -54,4 +55,5 @@ __all__ = [
     "Finding",
     "FindingTransition",
     "SlaPolicy",
+    "CveAssessment",
 ]
